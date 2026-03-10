@@ -1,0 +1,53 @@
+"""Strategy registry — maps strategy_id → CompressionStrategy instance."""
+
+from __future__ import annotations
+
+from context_agent.strategies.base import CompressionStrategy
+from context_agent.utils.errors import StrategyNotFoundError
+from context_agent.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class StrategyRegistry:
+    """Singleton registry for compression strategies.
+
+    Usage:
+        registry = StrategyRegistry.instance()
+        registry.register(MyStrategy())
+        strategy = registry.get("my_strategy_id")
+    """
+
+    _instance: StrategyRegistry | None = None
+
+    def __init__(self) -> None:
+        self._strategies: dict[str, CompressionStrategy] = {}
+
+    @classmethod
+    def instance(cls) -> StrategyRegistry:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def register(self, strategy: CompressionStrategy) -> None:
+        sid = strategy.strategy_id
+        if sid in self._strategies:
+            logger.warning("strategy already registered, overwriting", strategy_id=sid)
+        self._strategies[sid] = strategy
+        logger.info("strategy registered", strategy_id=sid)
+
+    def get(self, strategy_id: str) -> CompressionStrategy:
+        if strategy_id not in self._strategies:
+            raise StrategyNotFoundError(strategy_id)
+        return self._strategies[strategy_id]
+
+    def list_ids(self) -> list[str]:
+        return list(self._strategies.keys())
+
+    def unregister(self, strategy_id: str) -> None:
+        self._strategies.pop(strategy_id, None)
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton — used in tests only."""
+        cls._instance = None
