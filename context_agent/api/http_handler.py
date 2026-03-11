@@ -15,9 +15,13 @@ from context_agent.api.router import ContextAPIRouter
 from context_agent.api.schemas import (
     ContextRequest,
     ContextResponse,
+    ContextUsedRequest,
+    ContextUsedResponse,
     DelegateRequest,
     DelegateResponse,
     HealthResponse,
+    ToolResultRequest,
+    ToolResultResponse,
     VersionListResponse,
     WriteRequest,
     WriteResponse,
@@ -94,6 +98,8 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
                 agent_role=req.agent_role,
                 refs=req.refs,
                 policy=req.policy,
+                mode=req.mode,
+                category_filter=req.category_filter,
             )
         except Exception as exc:
             logger.exception("context retrieval error", error=str(exc))
@@ -167,5 +173,54 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     async def global_error_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.error("unhandled error", path=str(request.url), error=str(exc))
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    @app.post(
+        "/context/used",
+        response_model=ContextUsedResponse,
+        tags=["context"],
+        dependencies=[RequireAuth],
+        summary="Report used context items (Hotness Score feedback)",
+    )
+    async def report_used_context(req: ContextUsedRequest, request: Request) -> ContextUsedResponse:
+        """Inform ContextAgent which context items were injected and confirmed useful.
+
+        Increments ``active_count`` on matching items, boosting their Hotness Score
+        and rank in future retrievals.
+        """
+        router: ContextAPIRouter | None = request.app.state.api_router
+        if router is None:
+            raise HTTPException(status_code=503, detail="Service not initialised")
+        updated = await router.mark_used(
+            scope_id=req.scope_id,
+            session_id=req.session_id,
+            item_ids=req.item_ids,
+        )
+        return ContextUsedResponse(updated_count=updated)
+
+    @app.post(
+        "/tools/result",
+        response_model=ToolResultResponse,
+        tags=["tools"],
+        dependencies=[RequireAuth],
+        summary="Record tool call outcome (Tool Performance Memory)",
+    )
+    async def record_tool_result(req: ToolResultRequest, request: Request) -> ToolResultResponse:
+        """Record the outcome of a tool call.
+
+        Stats accumulate in ToolContextGovernor and influence future tool
+        selection: unreliable tools rank lower.
+        """
+        router: ContextAPIRouter | None = request.app.state.api_router
+        if router is None:
+            raise HTTPException(status_code=503, detail="Service not initialised")
+        router.record_tool_result(
+            scope_id=req.scope_id,
+            tool_id=req.tool_id,
+            success=req.success,
+            duration_ms=req.duration_ms,
+            prompt_tokens=req.prompt_tokens,
+            completion_tokens=req.completion_tokens,
+        )
+        return ToolResultResponse(tool_id=req.tool_id)
 
     return app

@@ -7,6 +7,7 @@ and cold (external memory) tiers based on latency budget and memory type.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -207,3 +208,46 @@ class TieredMemoryRouter:
         except (AdapterError, RetrievalError) as exc:
             logger.warning("cold tier error", scope_id=scope_id, error=str(exc))
             return []
+
+    # ── Usage feedback ─────────────────────────────────────────────────────────
+
+    async def record_usage(self, scope_id: str, item_ids: list[str]) -> None:
+        """Record that specific context items were confirmed as useful by the caller.
+
+        Increments active_count on matching hot-tier cache entries so that
+        Hotness Score boosts them in future retrievals.
+
+        Args:
+            scope_id: Scope whose cache to update.
+            item_ids: IDs of items that were actually used in a model call.
+        """
+        if not item_ids:
+            return
+        id_set = set(item_ids)
+
+        # Update hot-tier Redis entries
+        cache_key = f"ca:hot:{scope_id}"
+        try:
+            if self._redis is not None:
+                raw = await self._redis.get(cache_key)
+                if raw:
+                    data = json.loads(raw)
+                    changed = False
+                    for entry in data:
+                        if entry.get("item_id") in id_set:
+                            entry["active_count"] = entry.get("active_count", 0) + 1
+                            changed = True
+                    if changed:
+                        ttl = self._settings.hot_tier_ttl_s
+                        await self._redis.setex(cache_key, ttl, json.dumps(data))
+            else:
+                # Update in-process cache
+                entry = self._local_cache.get(cache_key)
+                if entry:
+                    items, ts = entry
+                    for item in items:
+                        if item.item_id in id_set:
+                            item.active_count += 1
+                    self._local_cache[cache_key] = (items, ts)
+        except Exception as exc:
+            logger.warning("record_usage failed", scope_id=scope_id, error=str(exc))

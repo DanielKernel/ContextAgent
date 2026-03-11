@@ -19,6 +19,41 @@ class MemoryType(str, Enum):
     VARIABLE = "variable"      # current session state, task variables
 
 
+class MemoryCategory(str, Enum):
+    """Fine-grained semantic category for memory items (adapted from OpenViking 6-category model).
+
+    User-side:
+      - PROFILE    : stable identity attributes (name, role, timezone)
+      - PREFERENCES: style, format, language preferences
+      - ENTITIES   : named entities the user cares about
+      - EVENTS     : timestamped occurrences, append-only
+
+    Agent-side:
+      - CASES      : problem + solution pairs, append-only
+      - PATTERNS   : reusable task patterns
+    """
+
+    PROFILE = "profile"
+    PREFERENCES = "preferences"
+    ENTITIES = "entities"
+    EVENTS = "events"
+    CASES = "cases"
+    PATTERNS = "patterns"
+
+
+class ContextLevel(str, Enum):
+    """Content detail level for progressive context expansion (adapted from OpenViking L0/L1/L2).
+
+    ABSTRACT : ~100 tokens — ultra-compressed summary for vector search / fast filtering
+    OVERVIEW : ~2k tokens  — structured summary for reranking / navigation
+    DETAIL   : unlimited   — full content, loaded on demand
+    """
+
+    ABSTRACT = "abstract"
+    OVERVIEW = "overview"
+    DETAIL = "detail"
+
+
 class OutputType(str, Enum):
     """Requested output format from ContextAPIRouter."""
 
@@ -41,11 +76,15 @@ class ContextItem(BaseModel):
     modality: str = "text"  # text / image / audio
     language: str = "zh"  # ISO 639-1
     memory_type: MemoryType | None = None
+    category: MemoryCategory | None = None  # semantic category (6-category taxonomy)
+    level: ContextLevel = ContextLevel.DETAIL  # content detail level (L0/L1/L2)
     score: float = 1.0  # relevance score [0, 1]
+    active_count: int = 0  # number of times this item was confirmed as used by a caller
     content: str = ""
     raw_content_ref: str | None = None  # S3 path for large content
     metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     @field_validator("score")
     @classmethod

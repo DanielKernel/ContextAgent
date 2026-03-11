@@ -11,6 +11,7 @@ Fuses results via RRF, applies reranking, and enforces token budget.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +23,7 @@ from context_agent.config.defaults import (
     HYBRID_VECTOR_WEIGHT,
     RERANK_TOP_K,
 )
+from context_agent.core.memory.hotness import HOTNESS_ALPHA, compute_hotness
 from context_agent.models.context import ContextItem
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
@@ -138,7 +140,12 @@ class UnifiedSearchCoordinator:
         k: int = 60,
         top_k: int = 20,
     ) -> list[ContextItem]:
-        """Reciprocal Rank Fusion across multiple result lists."""
+        """Reciprocal Rank Fusion across multiple result lists with hotness blending.
+
+        RRF score = Σ 1/(k + rank + 1) across all result lists.
+        Final score is blended with hotness at HOTNESS_ALPHA weight so that
+        frequently-confirmed context items rank higher over time.
+        """
         scores: dict[str, float] = {}
         item_map: dict[str, ContextItem] = {}
 
@@ -152,7 +159,12 @@ class UnifiedSearchCoordinator:
         result = []
         for iid in sorted_ids[:top_k]:
             item = item_map[iid].model_copy()
-            item.score = min(1.0, scores[iid])
+            rrf = scores[iid]
+            hotness = compute_hotness(item.active_count, item.updated_at)
+            # Normalise raw RRF score to [0,1] via tanh, then blend with hotness
+            normalised_rrf = math.tanh(rrf * k)
+            blended = (1.0 - HOTNESS_ALPHA) * normalised_rrf + HOTNESS_ALPHA * hotness
+            item.score = min(1.0, blended)
             result.append(item)
         return result
 

@@ -170,3 +170,27 @@ class WorkingMemoryManager:
         missing = [k for k in schema if k not in content]
         if missing:
             logger.debug("note content missing optional fields", missing=missing, note_type=note_type)
+
+    async def mark_used(
+        self, scope_id: str, session_id: str, item_ids: list[str]
+    ) -> int:
+        """Increment active_count on working-memory items matching item_ids.
+
+        This feeds the Hotness Score: items confirmed as useful by callers rank
+        higher in future retrievals.
+
+        Returns the number of notes actually updated.
+        """
+        if not item_ids:
+            return 0
+        id_set = set(item_ids)
+        notes = await self.list_notes(scope_id, session_id)
+        updated = 0
+        for note in notes:
+            if note.note_id in id_set:
+                active = note.content.get("_active_count", 0) + 1
+                await self.update_note(
+                    scope_id, note.session_id, note.note_id, {"_active_count": active}
+                )
+                updated += 1
+        return updated

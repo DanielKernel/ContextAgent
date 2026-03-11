@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from typing import Any
 
 from context_agent.core.context.exposure_controller import ExposureController
 from context_agent.core.context.health_checker import ContextHealthChecker
@@ -44,6 +45,9 @@ class ContextAPIRouter:
         health_checker: ContextHealthChecker | None = None,
         version_manager: ContextVersionManager | None = None,
         scheduler: HybridStrategyScheduler | None = None,
+        working_memory: Any | None = None,
+        tiered_router: Any | None = None,
+        tool_governor: Any | None = None,
     ) -> None:
         self._aggregator = aggregator
         self._compression = compression_router or CompressionStrategyRouter()
@@ -51,6 +55,9 @@ class ContextAPIRouter:
         self._hc = health_checker
         self._vm = version_manager or ContextVersionManager()
         self._scheduler = scheduler or HybridStrategyScheduler()
+        self._working_memory = working_memory
+        self._tiered_router = tiered_router
+        self._tool_governor = tool_governor
 
     async def handle(
         self,
@@ -64,6 +71,8 @@ class ContextAPIRouter:
         agent_role: str = "",
         refs: list | None = None,
         policy: ExposurePolicy | None = None,
+        mode: str = "fast",
+        category_filter: list | None = None,
     ) -> tuple[ContextOutput, list[str]]:
         """Execute the full context pipeline and return (output, warnings)."""
         request_id = uuid.uuid4().hex
@@ -80,6 +89,7 @@ class ContextAPIRouter:
             t0 = time.monotonic()
 
             # 1. Aggregate
+            from context_agent.models.context import ContextLevel, MemoryCategory
             agg_request = AggregationRequest(
                 scope_id=scope_id,
                 session_id=session_id,
@@ -87,6 +97,8 @@ class ContextAPIRouter:
                 refs=refs or [],
                 token_budget=token_budget,
                 top_k=top_k,
+                mode=mode,  # type: ignore[arg-type]
+                category_filter=category_filter,
             )
             snapshot = await self._aggregator.aggregate(agg_request)
 
@@ -162,3 +174,37 @@ class ContextAPIRouter:
             content=text,
             token_count=len(text) // 4,
         )
+
+    async def mark_used(
+        self, scope_id: str, session_id: str, item_ids: list[str]
+    ) -> int:
+        """Increment active_count on context items confirmed as useful.
+
+        Updates both the tiered router hot-cache and working-memory entries.
+        Returns the total number of records updated.
+        """
+        updated = 0
+        if self._tiered_router is not None:
+            await self._tiered_router.record_usage(scope_id, item_ids)
+        if self._working_memory is not None:
+            updated += await self._working_memory.mark_used(scope_id, session_id, item_ids)
+        return updated
+
+    def record_tool_result(
+        self,
+        scope_id: str,
+        tool_id: str,
+        success: bool,
+        duration_ms: float,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ) -> None:
+        """Delegate tool call outcome recording to ToolContextGovernor."""
+        if self._tool_governor is not None:
+            self._tool_governor.record_tool_result(
+                tool_id=tool_id,
+                success=success,
+                duration_ms=duration_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )

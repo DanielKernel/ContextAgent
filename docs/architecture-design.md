@@ -1486,4 +1486,76 @@ RETRY_CONFIG = {
 | 版本 | 日期 | 作者 | 变更说明 |
 |------|------|------|----------|
 | v1.0 | 2026-03-10 | ContextAgent 架构团队 | 初始版本，涵盖 4+1 视图全量内容 |
+| v1.1 | 2026-03-11 | ContextAgent 架构团队 | 新增 OpenViking 借鉴能力（见附录 D） |
+
+### D. OpenViking 借鉴能力（v1.1 新增）
+
+本版本从 volcengine/OpenViking 借鉴了 5 项差异化能力，充分复用 openJiuwen 框架原生接口（`AgenticRetriever`、`rrf_fusion`），最小化自研范围：
+
+#### D.1 Hotness Score（热度评分）
+
+**文件：** `context_agent/core/memory/hotness.py`
+
+```
+hotness = sigmoid(log1p(active_count)) × exp(-λ × age_days)   λ = ln(2)/half_life_days
+```
+
+- `active_count` 由 `POST /context/used` 反馈累加
+- 以 `HOTNESS_ALPHA=0.2` 权重混入 `SearchCoordinator._rrf_fuse()` 的 RRF 分数
+- 使高频确认有用的上下文在后续检索中排名更高
+
+#### D.2 used() 上下文使用反馈 API
+
+**新增端点：** `POST /context/used`  
+**新增方法：** `WorkingMemoryManager.mark_used()`、`TieredMemoryRouter.record_usage()`
+
+业务 Agent 在 LLM 响应后上报哪些上下文 item_id 被实际使用，驱动 Hotness Score 数据管道。
+
+#### D.3 ContextItem 语义分类（6 分类 MemoryCategory）
+
+**文件：** `context_agent/models/context.py`  
+**新增字段：** `ContextItem.category: MemoryCategory | None`
+
+| 分类 | 语义 |
+|------|------|
+| `profile` | 稳定身份属性（姓名、角色、时区） |
+| `preferences` | 风格/格式/语言偏好 |
+| `entities` | 用户关注的命名实体 |
+| `events` | 时序事件，追加式 |
+| `cases` | 问题+解决方案对，追加式 |
+| `patterns` | 可复用任务模式 |
+
+`AggregationRequest.category_filter` 支持按分类过滤注入的上下文。
+
+#### D.4 L0/L1/L2 分层上下文（渐进式展开）
+
+**文件：** `context_agent/models/context.py`（`ContextLevel` 枚举）  
+**新增字段：** `ContextItem.level: ContextLevel`
+
+| 层级 | Token 限制 | 用途 |
+|------|-----------|------|
+| ABSTRACT | ~100 | 向量搜索、快速过滤 |
+| OVERVIEW | ~2k | Rerank 精排、导航 |
+| DETAIL | 无限制 | 完整内容，按需加载 |
+
+`AggregationRequest.max_level` 控制最大注入层级，等同 budget 允许时才展开更高层级。
+
+#### D.5 fast/quality 双路径检索
+
+**文件：** `context_agent/orchestration/context_aggregator.py`  
+**新增参数：** `AggregationRequest.mode: "fast" | "quality"`
+
+| 路径 | 延迟 | 机制 |
+|------|------|------|
+| `fast`（默认） | 低 | `HybridRetriever` 并发检索 |
+| `quality` | 较高 | `AgenticRetriever`（openJiuwen 原生）LLM 驱动检索 |
+
+**关键决策：** quality 路径直接使用 openJiuwen `AgenticRetriever`，无需自研 IntentAnalyzer，符合"最大化复用框架能力"约束。
+
+#### D.6 工具性能记忆
+
+**新增方法：** `ToolContextGovernor.record_tool_result()`  
+**新增端点：** `POST /tools/result`
+
+累积工具调用成功率（`tool_stats.success_time / call_time`），低成功率工具在 `select_tools()` 中排名靠后。
 

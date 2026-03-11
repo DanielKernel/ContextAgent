@@ -74,7 +74,7 @@ class ToolContextGovernor:
         candidate_tools = self._filter_by_task_type(task_type)
 
         if len(candidate_tools) <= TOOL_RAG_THRESHOLD:
-            return candidate_tools
+            return self._sort_by_success_rate(candidate_tools)[:top_k]
 
         # Use RAG selection for large toolsets
         if self._retriever is not None:
@@ -135,3 +135,60 @@ class ToolContextGovernor:
             remainder = [t for t in candidate_tools if t.tool_id not in selected_ids]
             matched.extend(remainder[: top_k - len(matched)])
         return matched[:top_k]
+
+    def record_tool_result(
+        self,
+        tool_id: str,
+        success: bool,
+        duration_ms: float,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+    ) -> None:
+        """Record the outcome of a tool call to build performance memory.
+
+        Stats are stored in ``ToolDefinition.metadata["tool_stats"]`` and used
+        by ``select_tools()`` to down-weight unreliable tools.
+
+        Args:
+            tool_id:          ID of the tool that was called.
+            success:          Whether the call succeeded.
+            duration_ms:      Wall-clock duration of the call in milliseconds.
+            prompt_tokens:    LLM prompt tokens consumed (0 if N/A).
+            completion_tokens: LLM completion tokens consumed (0 if N/A).
+        """
+        tool = self._tools.get(tool_id)
+        if tool is None:
+            logger.warning("record_tool_result: unknown tool_id", tool_id=tool_id)
+            return
+
+        stats: dict = tool.metadata.setdefault("tool_stats", {
+            "call_time": 0,
+            "success_time": 0,
+            "total_duration_ms": 0.0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        })
+        stats["call_time"] += 1
+        if success:
+            stats["success_time"] += 1
+        stats["total_duration_ms"] += duration_ms
+        stats["prompt_tokens"] += prompt_tokens
+        stats["completion_tokens"] += completion_tokens
+
+        logger.debug(
+            "tool stats updated",
+            tool_id=tool_id,
+            success_rate=stats["success_time"] / stats["call_time"],
+            avg_duration_ms=stats["total_duration_ms"] / stats["call_time"],
+        )
+
+    def _success_rate(self, tool: ToolDefinition) -> float:
+        """Return success rate in [0, 1]. Returns 1.0 for tools with no recorded calls."""
+        stats = tool.metadata.get("tool_stats")
+        if not stats or stats.get("call_time", 0) == 0:
+            return 1.0
+        return stats["success_time"] / stats["call_time"]
+
+    def _sort_by_success_rate(self, tools: list[ToolDefinition]) -> list[ToolDefinition]:
+        """Sort tools by descending success rate (most reliable first)."""
+        return sorted(tools, key=self._success_rate, reverse=True)

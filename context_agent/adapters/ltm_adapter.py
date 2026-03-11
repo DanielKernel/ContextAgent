@@ -30,6 +30,19 @@ class LongTermMemoryPort(ABC):
     ) -> list[ContextItem]:
         """Search memory and return ranked ContextItems."""
 
+    async def agentic_search(
+        self,
+        scope_id: str,
+        query: str,
+        top_k: int = 10,
+    ) -> list[ContextItem]:
+        """LLM-driven agentic search for complex queries (quality path).
+
+        Default implementation falls back to standard search.
+        Override in concrete adapters that support AgenticRetriever.
+        """
+        return await self.search(scope_id, query, top_k)
+
     @abstractmethod
     async def add_messages(
         self,
@@ -143,3 +156,43 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
             return True
         except Exception:
             return False
+
+    async def agentic_search(
+        self,
+        scope_id: str,
+        query: str,
+        top_k: int = 10,
+    ) -> list[ContextItem]:
+        """Quality-path search using openJiuwen AgenticRetriever (if available).
+
+        The LTM object may optionally expose an agentic_retrieve method that
+        wraps AgenticRetriever internally.  Falls back to standard search.
+        """
+        if hasattr(self._ltm, "agentic_retrieve"):
+            try:
+                results = await self._ltm.agentic_retrieve(  # type: ignore[attr-defined]
+                    query=query, user_id=scope_id, top_k=top_k
+                )
+                items = []
+                for r in results:
+                    items.append(
+                        ContextItem(
+                            source_type="ltm_agentic",
+                            tier="warm",
+                            score=getattr(r, "score", 1.0),
+                            content=getattr(r, "memory", getattr(r, "content", str(r))),
+                            metadata={
+                                "memory_id": getattr(r, "id", ""),
+                                "scope_id": scope_id,
+                                "retrieval_mode": "agentic",
+                            },
+                        )
+                    )
+                return items
+            except Exception as exc:
+                logger.warning(
+                    "agentic_retrieve failed, falling back to standard search",
+                    scope_id=scope_id,
+                    error=str(exc),
+                )
+        return await self.search(scope_id, query, top_k)

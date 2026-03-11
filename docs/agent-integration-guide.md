@@ -803,3 +803,121 @@ configure_logging("DEBUG")
 - `compression_demo.py` — 压缩策略演示
 - `tool_governance.py` — 工具治理演示
 - `business_agent.py` — 完整 CRM 客服 Agent 集成
+
+---
+
+## 九、OpenViking 借鉴能力使用指南
+
+### 9.1 used() 反馈 API — 驱动 Hotness Score
+
+每次 LLM 调用后，上报哪些上下文 item 被实际使用，ContextAgent 会递增其 `active_count` 并提高后续排名。
+
+```python
+import httpx
+
+async def report_used(scope_id: str, session_id: str, item_ids: list[str]):
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            "http://context-agent/context/used",
+            json={
+                "scope_id": scope_id,
+                "session_id": session_id,
+                "item_ids": item_ids,
+            },
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+# 在 LLM 调用后调用：
+snapshot = await context_agent.handle(scope_id, session_id, query)
+response = await llm.chat(build_messages(snapshot))
+
+# 上报实际用到的 item_ids（例如注入 system prompt 的条目）
+used_ids = [item.item_id for item in snapshot.items[:3]]
+await report_used(scope_id, session_id, used_ids)
+```
+
+### 9.2 quality 模式 — 复杂任务精准检索
+
+对复杂多步骤任务，使用 `mode="quality"` 激活 `AgenticRetriever`（openJiuwen 原生）进行 LLM 驱动检索，延迟略高但召回精度更好。
+
+```python
+output, _ = await router.handle(
+    scope_id=scope_id,
+    session_id=session_id,
+    query="分析 Q3 财务数据并生成执行摘要",
+    mode="quality",        # 激活 AgenticRetriever
+    token_budget=6000,
+)
+```
+
+**最佳实践：** 对话消息用 `fast`，复杂规划任务用 `quality`。
+
+### 9.3 MemoryCategory 分类过滤
+
+按语义分类精确控制注入哪类记忆：
+
+```python
+from context_agent.models.context import MemoryCategory
+
+# 只注入用户偏好 + 工作模式，不注入历史事件
+output, _ = await router.handle(
+    scope_id=scope_id,
+    session_id=session_id,
+    query=query,
+    category_filter=[MemoryCategory.PREFERENCES, MemoryCategory.PATTERNS],
+)
+```
+
+**写入时建议打标：**
+```python
+item = ContextItem(
+    source_type="memory",
+    content="用户偏好：输出中文简体，不使用项目符号",
+    category=MemoryCategory.PREFERENCES,  # 标记语义分类
+    level=ContextLevel.ABSTRACT,          # L0：轻量摘要
+)
+```
+
+### 9.4 L0/L1/L2 分层上下文
+
+通过 `max_level` 控制注入的上下文详细程度：
+
+```python
+from context_agent.models.context import ContextLevel
+
+# 快速对话：只注入摘要（L0）
+output, _ = await router.handle(..., max_level=ContextLevel.ABSTRACT)
+
+# 深度任务：允许注入概要（L1）
+output, _ = await router.handle(..., max_level=ContextLevel.OVERVIEW)
+
+# 完整内容（默认）
+output, _ = await router.handle(..., max_level=ContextLevel.DETAIL)
+```
+
+**写入建议：** 为同一内容写入多个层级的 ContextItem，level 字段分别设为 ABSTRACT/OVERVIEW/DETAIL，内容长度递增。
+
+### 9.5 工具性能记忆
+
+工具调用后上报结果，ContextAgent 积累成功率并在下次 `select_tools()` 时优先选择可靠工具：
+
+```python
+async def call_tool(tool_id: str, args: dict, gov: ToolContextGovernor):
+    import time
+    t0 = time.monotonic()
+    try:
+        result = await execute_tool(tool_id, args)
+        gov.record_tool_result(tool_id, success=True, duration_ms=(time.monotonic()-t0)*1000)
+        return result
+    except Exception as e:
+        gov.record_tool_result(tool_id, success=False, duration_ms=(time.monotonic()-t0)*1000)
+        raise
+
+# 或通过 HTTP：
+await client.post("/tools/result", json={
+    "scope_id": scope_id,
+    "tool_id": "search_tool",
+    "success": True,
+    "duration_ms": 142.5,
+})
+```
