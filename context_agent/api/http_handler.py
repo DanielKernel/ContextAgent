@@ -229,3 +229,21 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         return ToolResultResponse(tool_id=req.tool_id)
 
     return app
+
+
+# ---------------------------------------------------------------------------
+# Module-level ASGI app used by uvicorn:
+#   uvicorn context_agent.api.http_handler:app
+#
+# Initialises a default ContextAPIRouter (all optional deps are None which
+# means in-memory / stub implementations are used).  For production you can
+# replace this with `create_app(api_router=your_router)` in an entrypoint.
+# ---------------------------------------------------------------------------
+def _build_default_app() -> FastAPI:
+    from context_agent.orchestration.context_aggregator import ContextAggregator
+
+    default_router = ContextAPIRouter(aggregator=ContextAggregator())
+    return create_app(api_router=default_router)
+
+
+app = _build_default_app()
