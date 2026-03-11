@@ -49,26 +49,46 @@ echo ""
 # ── 第 1 步：检查 Python 3.11+ ────────────────────────────────────────────────
 info "检查 Python 版本..."
 PYTHON3=""
-for candidate in python3.11 python3.12 python3.13 python3; do
+for candidate in python3.13 python3.12 python3.11 python3; do
   if command -v "$candidate" &>/dev/null; then
-    PYTHON3="$(command -v "$candidate")"
-    break
+    # 验证版本 >= 3.11
+    if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
+      PYTHON3="$(command -v "$candidate")"
+      break
+    fi
   fi
 done
-[[ -z "$PYTHON3" ]] && die "未找到 Python 3。请先安装 Python 3.11+：https://python.org"
+[[ -z "$PYTHON3" ]] && die "未找到 Python 3.11+。请先安装：https://python.org/downloads/"
 
 PY_VERSION=$("$PYTHON3" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
-"$PYTHON3" -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" \
-  || die "需要 Python 3.11+，当前版本 $PY_VERSION。请升级 Python。"
-
 success "Python $PY_VERSION ($PYTHON3)"
 
-# ── 第 2 步：创建虚拟环境 ─────────────────────────────────────────────────────
+# ── 第 2 步：检查虚拟环境健康状态 ────────────────────────────────────────────
 cd "$PROJECT_DIR"
+
+_venv_healthy() {
+  # 检查 python3 可执行文件存在且可运行，且版本 >= 3.11
+  local venv_py="$VENV_DIR/bin/python3"
+  [[ -x "$venv_py" ]] || return 1
+  "$venv_py" -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null || return 1
+  # 检查 pip 可用
+  [[ -x "$VENV_DIR/bin/pip" ]] || return 1
+  return 0
+}
+
 if [[ -d "$VENV_DIR" ]]; then
-  info "虚拟环境已存在，跳过创建"
+  if _venv_healthy; then
+    VENV_PY_VER=$("$VENV_DIR/bin/python3" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')")
+    info "虚拟环境已存在且健康（Python $VENV_PY_VER）"
+  else
+    warn "虚拟环境存在但不健康（Python 版本不符或文件损坏），正在重建..."
+    rm -rf "$VENV_DIR"
+    info "创建 Python 虚拟环境..."
+    "$PYTHON3" -m venv "$VENV_DIR"
+    success "虚拟环境重建完成：$VENV_DIR"
+  fi
 else
-  info "创建 Python 虚拟环境..."
+  info "创建 Python 虚拟环境（$VENV_DIR）..."
   "$PYTHON3" -m venv "$VENV_DIR"
   success "虚拟环境创建完成：$VENV_DIR"
 fi
