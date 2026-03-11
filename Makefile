@@ -1,4 +1,4 @@
-.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-test venv-run
+.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run setup-openclaw uninstall-openclaw
 
 PYTHON3 := python3
 VENV_DIR := .venv
@@ -17,7 +17,12 @@ venv:
 
 ## 在虚拟环境中安装项目及开发依赖（不需要 uv）
 venv-install: venv
-	$(VENV_PIP) install -e ".[dev]"
+	$(VENV_PIP) install -r requirements.txt
+	$(VENV_PIP) install -e "." --no-deps
+
+## 更新 requirements.txt 快照（venv-install 完成后运行）
+venv-freeze:
+	$(VENV_PIP) freeze > requirements.txt
 
 ## 在虚拟环境中运行单元测试（不需要 uv）
 venv-test:
@@ -69,3 +74,17 @@ clean-venv: clean
 
 run-dev:
 	$(UV) run uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
+
+# ── 一键脚本 ─────────────────────────────────────────────────────────────────
+
+## 一键安装 ContextAgent 并启动服务
+quickstart:
+	bash scripts/install.sh --start
+
+## 一键对接 OpenClaw（ContextAgent 服务需已启动）
+setup-openclaw:
+	bash scripts/setup-openclaw.sh
+
+## 移除 OpenClaw 对接
+uninstall-openclaw:
+	bash scripts/setup-openclaw.sh --uninstall
