@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from context_agent.api.auth import RequireAuth
+from context_agent.api.openclaw_handler import openclaw_router
 from context_agent.api.router import ContextAPIRouter
 from context_agent.api.schemas import (
     ContextRequest,
@@ -65,6 +66,10 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
 
     # Store the router instance in app state so routes can access it
     app.state.api_router = api_router
+
+    # Mount the OpenClaw context-engine bridge (unauthenticated sub-router;
+    # security is handled at the network/plugin-config level)
+    app.include_router(openclaw_router)
 
     # ── Routes ────────────────────────────────────────────────────────────────
 

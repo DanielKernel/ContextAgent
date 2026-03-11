@@ -144,3 +144,5 @@ class ContextOutput(BaseModel):
     degraded: bool = False
     error: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Arbitrary key/value metadata (e.g. item_ids for OpenClaw used() feedback)
+    metadata: dict[str, Any] = Field(default_factory=dict)

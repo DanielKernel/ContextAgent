@@ -1559,3 +1559,129 @@ hotness = sigmoid(log1p(active_count)) × exp(-λ × age_days)   λ = ln(2)/half
 
 累积工具调用成功率（`tool_stats.success_time / call_time`），低成功率工具在 `select_tools()` 中排名靠后。
 
+
+---
+
+## 附录 E：OpenClaw 集成架构（context-engine 插件体系）
+
+### E.1 概述
+
+OpenClaw 3.8（PR #22201，2026-03-06 合并）引入了 **context-engine 插件槽**，允许第三方服务替换其内置的 Pi legacy 上下文管理器。ContextAgent 通过此机制以 **HTTP 代理**形式接管 OpenClaw 的全部上下文生命周期。
+
+参考实现：`Martian-Engineering/lossless-claw`（第一个真实 context-engine 插件）
+
+---
+
+### E.2 集成架构图
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  OpenClaw 3.8                        │
+│  ┌───────────────────────────────────────────────┐  │
+│  │           attempt.ts（每轮对话）               │  │
+│  │  hadSession → bootstrap()                     │  │
+│  │  pipeline  → assemble()   ← inject context    │  │
+│  │  LLM call                                     │  │
+│  │  afterTurn → afterTurn()  ← Hotness feedback  │  │
+│  │  overflow  → compact()    ← compress          │  │
+│  │  finally   → dispose()                        │  │
+│  └──────────────┬────────────────────────────────┘  │
+│                 │ ContextEngine interface             │
+│  ┌──────────────▼────────────────────────────────┐  │
+│  │  ContextAgentEngine (TypeScript)               │  │
+│  │  plugins/openclaw-plugin/src/engine.ts         │  │
+│  └──────────────┬────────────────────────────────┘  │
+│                 │ HTTP fetch (Node.js ≥18)            │
+└─────────────────┼───────────────────────────────────┘
+                  │
+     ┌────────────▼─────────────────────────────────┐
+     │       ContextAgent HTTP Service (Python)       │
+     │  POST /v1/openclaw/bootstrap                   │
+     │  POST /v1/openclaw/ingest                      │
+     │  POST /v1/openclaw/assemble  ◄── 核心路径      │
+     │  POST /v1/openclaw/compact                     │
+     │  POST /v1/openclaw/after-turn                  │
+     │                                                │
+     │  context_agent/api/openclaw_handler.py         │
+     │  context_agent/api/openclaw_schemas.py         │
+     └────────────┬─────────────────────────────────┘
+                  │
+     ┌────────────▼─────────────────────────────────┐
+     │         ContextAPIRouter (现有管道)            │
+     │  TieredMemoryRouter + WorkingMemoryManager    │
+     │  HybridRetriever / AgenticRetriever           │
+     │  CompressionStrategyRouter                    │
+     │  Hotness Score (active_count feedback)        │
+     └──────────────────────────────────────────────┘
+```
+
+---
+
+### E.3 生命周期调用链
+
+| OpenClaw 调用点 | 触发条件 | ContextAgent 动作 | 端点 |
+|----------------|---------|-----------------|------|
+| `bootstrap()` | `hadSessionFile=true`（已有会话） | 预热缓存，导入历史消息 | `/bootstrap` |
+| `assemble()` | 每轮 LLM 调用前 | 检索相关上下文 → `systemPromptAddition` | `/assemble` |
+| `afterTurn()` | 每轮完成后 | Hotness 反馈 + 持久化 assistant 回复 | `/after-turn` |
+| `compact()` | token 溢出（overflow safety net） | 压缩策略管道 | `/compact` |
+| `dispose()` | run 结束 finally 块 | 清理状态 | —（无网络调用） |
+
+---
+
+### E.4 assemble() 注入策略（Mode B）
+
+ContextAgent 使用 **Mode B** — 注入模式（区别于 lossless-claw 的 Mode A 消息替换）：
+
+```
+assemble() 返回：
+  messages:               原始消息列表（不修改）
+  systemPromptAddition:   "# Relevant Context\n\n{retrieved_context}"
+```
+
+OpenClaw 将 `systemPromptAddition` **prepend** 到 system prompt 头部，模型以此感知历史上下文。
+
+---
+
+### E.5 ownsCompaction 标志
+
+`ContextAgentEngine.getInfo()` 返回 `{ ownsCompaction: true }`，通知 OpenClaw 跳过内置 Pi 自动压缩。Token 溢出 overflow safety net（`compact()`）始终激活，与此标志无关。
+
+---
+
+### E.6 插件包结构
+
+```
+plugins/openclaw-plugin/
+├── index.ts                   # 插件入口，export default plugin
+├── src/
+│   ├── engine.ts              # ContextAgentEngine implements ContextEngine
+│   ├── client.ts              # HTTP fetch 封装（超时/重试/Bearer 认证）
+│   └── config.ts              # parseConfig()
+├── openclaw.plugin.json       # 插件 manifest（无 kind 字段）
+├── package.json               # type:module, openclaw.extensions:["./index.ts"]
+├── tsconfig.json
+└── README.md
+```
+
+**关键决策：OpenClaw 直接加载 TypeScript 源码**，无需预编译。插件通过 `package.json` 中的 `"openclaw": { "extensions": ["./index.ts"] }` 发现。
+
+---
+
+### E.7 Python Bridge 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `context_agent/api/openclaw_schemas.py` | 5 对 Pydantic request/response schema（`AgentMessage` + `Bootstrap/Ingest/Assemble/Compact/AfterTurn`） |
+| `context_agent/api/openclaw_handler.py` | FastAPI `APIRouter`，挂载于 `/v1/openclaw`，5 个端点实现 |
+| `context_agent/api/http_handler.py` | 新增 `app.include_router(openclaw_router)` |
+| `context_agent/models/context.py` | `ContextOutput` 新增 `metadata: dict` 字段（用于 item_ids 透传） |
+
+---
+
+### E.8 scope_id / session_id 映射
+
+| OpenClaw 概念 | ContextAgent 字段 | 推荐值 |
+|--------------|-----------------|-------|
+| 逻辑命名空间 | `scope_id` | 插件 config 中 `scopeId`（默认 `"openclaw"`，建议按 channel 设置） |
+| 会话标识 | `session_id` | OpenClaw 传入的 `sessionId` |

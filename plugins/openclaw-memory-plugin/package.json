@@ -1,0 +1,16 @@
+{
+  "name": "@context-agent/openclaw-memory-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw memory-kind plugin for ContextAgent — tool-based recall and storage",
+  "type": "module",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

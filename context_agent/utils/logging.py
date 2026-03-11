@@ -32,7 +32,7 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
             logging.getLevelName(level.upper())
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 

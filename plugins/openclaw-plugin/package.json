@@ -1,0 +1,18 @@
+{
+  "name": "@context-agent/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw context-engine plugin — delegates context management to a running ContextAgent HTTP service",
+  "author": "ContextAgent",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

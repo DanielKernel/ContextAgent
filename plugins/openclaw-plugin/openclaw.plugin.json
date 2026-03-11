@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContextAgent Plugin Configuration",
+  "description": "Configuration for the ContextAgent OpenClaw context-engine plugin",
+  "type": "object",
+  "properties": {
+    "baseUrl": {
+      "type": "string",
+      "description": "Base URL of the ContextAgent HTTP service",
+      "default": "http://localhost:8000",
+      "examples": ["http://localhost:8000", "https://context-agent.example.com"]
+    },
+    "apiKey": {
+      "type": "string",
+      "description": "Optional Bearer token for ContextAgent API authentication",
+      "default": ""
+    },
+    "scopeId": {
+      "type": "string",
+      "description": "Logical scope identifier. Use a per-channel or per-user value to isolate memories.",
+      "default": "openclaw"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "description": "HTTP request timeout in milliseconds",
+      "default": 5000,
+      "minimum": 100
+    },
+    "contextTokenBudget": {
+      "type": "number",
+      "description": "Maximum tokens to inject via systemPromptAddition",
+      "default": 2048,
+      "minimum": 128
+    },
+    "retrievalMode": {
+      "type": "string",
+      "enum": ["fast", "quality"],
+      "description": "'fast' uses hybrid retrieval; 'quality' uses LLM-driven agentic retrieval",
+      "default": "fast"
+    },
+    "topK": {
+      "type": "number",
+      "description": "Number of context items to retrieve per assemble() call",
+      "default": 8,
+      "minimum": 1
+    }
+  },
+  "required": ["baseUrl"],
+  "uiHints": {
+    "baseUrl": { "order": 1, "label": "ContextAgent URL" },
+    "apiKey": { "order": 2, "label": "API Key", "sensitive": true },
+    "scopeId": { "order": 3, "label": "Scope ID" },
+    "retrievalMode": { "order": 4, "label": "Retrieval Mode" }
+  }
+}
