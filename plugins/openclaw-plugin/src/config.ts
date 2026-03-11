@@ -32,15 +32,17 @@ const DEFAULTS: Omit<ContextAgentConfig, "baseUrl"> = {
 };
 
 export function parseConfig(value: unknown): ContextAgentConfig {
-  if (typeof value !== "object" || value === null) {
-    throw new Error("ContextAgent plugin config must be an object");
+  // When the plugin is loaded without a config sub-object, use all defaults.
+  if (value === null || value === undefined) {
+    return { baseUrl: "http://localhost:8000", ...DEFAULTS };
+  }
+  if (typeof value !== "object") {
+    return { baseUrl: "http://localhost:8000", ...DEFAULTS };
   }
   const raw = value as Record<string, unknown>;
 
-  const baseUrl = (raw["baseUrl"] as string | undefined) ?? "";
-  if (!baseUrl) {
-    throw new Error("ContextAgent plugin config: 'baseUrl' is required");
-  }
+  // baseUrl defaults to localhost when not explicitly configured
+  const baseUrl = ((raw["baseUrl"] as string | undefined) ?? "http://localhost:8000").replace(/\/$/, "");
 
   return {
     baseUrl: baseUrl.replace(/\/$/, ""), // strip trailing slash

@@ -1,0 +1,43 @@
+{
+  "id": "context-agent-memory",
+  "name": "ContextAgent Memory",
+  "description": "Lightweight memory-kind plugin: exposes recall/store/forget tools backed by ContextAgent.",
+  "version": "0.1.0",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Base URL of the ContextAgent HTTP service",
+        "default": "http://localhost:8000"
+      },
+      "scopeId": {
+        "type": "string",
+        "description": "Memory namespace / scope identifier",
+        "default": "openclaw"
+      },
+      "autoRecall": {
+        "type": "boolean",
+        "description": "Automatically inject memories at session start",
+        "default": false
+      },
+      "autoCapture": {
+        "type": "boolean",
+        "description": "Automatically capture conversation summaries at session end",
+        "default": false
+      },
+      "autoRecallMinScore": {
+        "type": "number",
+        "description": "Minimum relevance score for auto-recall",
+        "default": 0.5
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Optional Bearer token for ContextAgent API authentication",
+        "default": ""
+      }
+    },
+    "required": []
+  }
+}

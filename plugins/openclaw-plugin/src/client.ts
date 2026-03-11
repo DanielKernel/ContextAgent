@@ -144,6 +144,30 @@ export class ContextAgentClient {
     });
   }
 
+  // ── Main ContextAgent API (hooks-based integration) ───────────────────────
+
+  /** Retrieve relevant context for a given query via the main /context endpoint. */
+  async retrieveContext(params: {
+    scope_id: string;
+    session_id: string;
+    query: string;
+    token_budget?: number;
+    top_k?: number;
+    mode?: "fast" | "quality";
+  }): Promise<{ output?: { content?: string; items?: unknown[] } }> {
+    return this._post("/context", params);
+  }
+
+  /** Write content to ContextAgent memory via /context/write. */
+  async writeContext(params: {
+    scope_id: string;
+    session_id: string;
+    content: string;
+    source_type?: string;
+  }): Promise<{ item_id: string; status: string }> {
+    return this._post("/context/write", params);
+  }
+
   private async _post<T>(path: string, body: unknown): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);

@@ -260,7 +260,8 @@ success "context-engine 插件安装完成"
 # ── 第 5 步：配置 OpenClaw ────────────────────────────────────────────────────
 step "写入 OpenClaw 配置"
 
-openclaw config set plugins.slots.contextEngine "context-agent"
+# Note: plugins.slots.contextEngine does not exist in this SDK version.
+# Context injection is done via before_prompt_build hook, no slot config needed.
 openclaw config set plugins.entries.context-agent.enabled               true              --strict-json
 openclaw config set plugins.entries.context-agent.config.baseUrl        "$CA_BASE_URL"
 openclaw config set plugins.entries.context-agent.config.scopeId        "$CA_SCOPE_ID"
@@ -269,6 +270,9 @@ openclaw config set plugins.entries.context-agent.config.contextTokenBudget "$CA
 openclaw config set plugins.entries.context-agent.config.retrievalMode  "$CA_RETRIEVAL_MODE"
 openclaw config set plugins.entries.context-agent.config.topK           "$CA_TOP_K"         --strict-json
 openclaw config set plugins.entries.context-agent.config.minScore       "0.01"              --strict-json
+
+# Allow the plugin to load without the "non-bundled plugin" security warning
+openclaw config set plugins.allow '["context-agent"]' --strict-json 2>/dev/null || true
 
 if [[ -n "$CA_API_KEY" ]]; then
   openclaw config set plugins.entries.context-agent.config.apiKey "$CA_API_KEY"
