@@ -23,7 +23,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-PLUGIN_DIR="$PROJECT_DIR/plugins/openclaw-plugin"
+PLUGIN_DIR="$PROJECT_DIR/plugins/context-agent"
 MEMORY_PLUGIN_DIR="$PROJECT_DIR/plugins/openclaw-memory-plugin"
 
 OC_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-$HOME/.openclaw}"
@@ -251,6 +251,34 @@ fi
 step "安装 context-engine 插件"
 [[ -d "$PLUGIN_DIR" ]] || die "插件目录不存在：$PLUGIN_DIR"
 
+# 修复可能遗留的旧插件路径（旧目录名 openclaw-plugin → context-agent）
+if [[ -f "$OC_CONFIG_FILE" ]]; then
+  python3 - "$OC_CONFIG_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+cfg = json.load(open(path))
+changed = False
+p = cfg.get("plugins", {})
+# Fix stale load.paths
+for i, lp in enumerate(p.get("load", {}).get("paths", [])):
+    fixed = lp.replace("/plugins/openclaw-plugin", "/plugins/context-agent")
+    if fixed != lp:
+        p["load"]["paths"][i] = fixed
+        changed = True
+# Fix stale install records
+for k, v in p.get("installs", {}).items():
+    for field in ("sourcePath", "installPath"):
+        if field in v:
+            fixed = v[field].replace("/plugins/openclaw-plugin", "/plugins/context-agent")
+            if fixed != v[field]:
+                v[field] = fixed
+                changed = True
+if changed:
+    json.dump(cfg, open(path, "w"), indent=4)
+    print("[INFO]  已修复旧插件路径引用")
+PYEOF
+fi
+
 openclaw plugins uninstall context-agent 2>/dev/null && \
   info "已卸载旧版本插件" || true
 
@@ -260,8 +288,13 @@ success "context-engine 插件安装完成"
 # ── 第 5 步：配置 OpenClaw ────────────────────────────────────────────────────
 step "写入 OpenClaw 配置"
 
-# Note: plugins.slots.contextEngine does not exist in this SDK version.
-# Context injection is done via before_prompt_build hook, no slot config needed.
+# 清除旧版本遗留的 contextEngine slot 设置（旧版脚本会设置该项，导致
+# OpenClaw 启动时报 "Context engine not registered" 错误）
+info "清除旧版 contextEngine slot 配置（如有）..."
+openclaw config unset plugins.slots.contextEngine 2>/dev/null || true
+openclaw config unset plugins.slots 2>/dev/null || true
+
+# Context injection uses before_prompt_build hook — no slot registration needed.
 openclaw config set plugins.entries.context-agent.enabled               true              --strict-json
 openclaw config set plugins.entries.context-agent.config.baseUrl        "$CA_BASE_URL"
 openclaw config set plugins.entries.context-agent.config.scopeId        "$CA_SCOPE_ID"

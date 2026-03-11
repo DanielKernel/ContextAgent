@@ -62,10 +62,10 @@ curl http://localhost:8000/health
 
 ```bash
 # 本地路径安装（开发阶段）
-openclaw plugins install /path/to/ContextAgent/plugins/openclaw-plugin
+openclaw plugins install /path/to/ContextAgent/plugins/context-agent
 
 # 或从 npm 安装（发布后）
-openclaw plugins install @context-agent/openclaw-plugin
+openclaw plugins install @context-agent/context-agent-plugin
 ```
 
 ### 步骤 3：配置激活
@@ -245,7 +245,7 @@ config:
 **检查：**
 1. ContextAgent 服务是否运行：`curl http://localhost:8000/health`
 2. `baseUrl` 是否正确（无尾随斜杠）
-3. 插件目录结构是否完整：`ls plugins/openclaw-plugin/`
+3. 插件目录结构是否完整：`ls plugins/context-agent/`
 
 ### assemble 超时
 

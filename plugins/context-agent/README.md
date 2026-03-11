@@ -1,4 +1,4 @@
-# @context-agent/openclaw-plugin
+# @context-agent/context-agent-plugin
 
 OpenClaw **context-engine** plugin that delegates all context management to a running [ContextAgent](https://github.com/yourorg/ContextAgent) HTTP service.
 
@@ -26,13 +26,13 @@ ContextAgent uses **Mode B** for assembly: original `messages` are returned unch
 
 ```bash
 # From OpenClaw config dir
-openclaw plugins install /path/to/ContextAgent/plugins/openclaw-plugin
+openclaw plugins install /path/to/ContextAgent/plugins/context-agent
 ```
 
 ### Option 2 — npm (once published)
 
 ```bash
-openclaw plugins install @context-agent/openclaw-plugin
+openclaw plugins install @context-agent/context-agent-plugin
 ```
 
 ---
@@ -121,7 +121,7 @@ The plugin calls these ContextAgent endpoints:
 
 ```bash
 # No compilation needed — OpenClaw loads TypeScript directly
-cd plugins/openclaw-plugin
+cd plugins/context-agent
 
 # Type-check only
 npx tsc --noEmit
@@ -133,7 +133,7 @@ npx tsc --noEmit
 
 ```
 OpenClaw (TypeScript)
-  └── ContextAgentEngine (plugins/openclaw-plugin/src/engine.ts)
+  └── ContextAgentEngine (plugins/context-agent/src/engine.ts)
         └── ContextAgentClient (src/client.ts)  — fetch to HTTP bridge
               └── ContextAgent (Python / FastAPI)
                     ├── /v1/openclaw/bootstrap

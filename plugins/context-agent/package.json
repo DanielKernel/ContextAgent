@@ -1,5 +1,5 @@
 {
-  "name": "@context-agent/openclaw-plugin",
+  "name": "context-agent",
   "version": "0.1.0",
   "description": "OpenClaw context-engine plugin — delegates context management to a running ContextAgent HTTP service",
   "author": "ContextAgent",
