@@ -35,6 +35,53 @@ done
 CONFIG_DIR="$(dirname "$CONFIG_PATH")"
 mkdir -p "$CONFIG_DIR"
 
+find_linux_pg_bin_dir() {
+  local candidate version fallback_pg_bin_dir=""
+
+  if [[ -n "${CA_PGVECTOR_BIN_DIR:-}" ]]; then
+    [[ -x "${CA_PGVECTOR_BIN_DIR}/initdb" ]] || die "CA_PGVECTOR_BIN_DIR 未包含 initdb：${CA_PGVECTOR_BIN_DIR}"
+    echo "$CA_PGVECTOR_BIN_DIR"
+    return 0
+  fi
+
+  if command -v initdb >/dev/null 2>&1; then
+    echo "$(dirname "$(command -v initdb)")"
+    return 0
+  fi
+
+  while IFS= read -r candidate; do
+    [[ -d "$candidate" ]] || continue
+    version="$(basename "$(dirname "$candidate")")"
+    if [[ -x "$candidate/initdb" && -x "$candidate/pg_ctl" && -x "$candidate/psql" && -x "$candidate/createdb" && -x "$candidate/pg_isready" ]]; then
+      if [[ -f "/usr/share/postgresql/$version/extension/vector.control" ]]; then
+        echo "$candidate"
+        return 0
+      fi
+      if [[ -z "${fallback_pg_bin_dir:-}" ]]; then
+        fallback_pg_bin_dir="$candidate"
+      fi
+    fi
+  done < <(printf '%s\n' /usr/lib/postgresql/*/bin 2>/dev/null | sort -Vr)
+
+  if [[ -n "${fallback_pg_bin_dir:-}" ]]; then
+    echo "$fallback_pg_bin_dir"
+    return 0
+  fi
+
+  return 1
+}
+
+run_as_postgres_owner() {
+  local owner="$1"
+  shift
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    su -s /bin/bash "$owner" -c "$*"
+  else
+    bash -lc "$*"
+  fi
+}
+
 copy_example_config() {
   local example_file="$PROJECT_DIR/examples/openjiuwen.$BACKEND.yaml.example"
   [[ -f "$example_file" ]] || die "未找到示例配置：$example_file"
@@ -50,6 +97,11 @@ setup_pgvector_backend() {
   local pg_db_name="${CA_PGVECTOR_DB:-context_agent}"
   local pg_user="${CA_PGVECTOR_USER:-${USER:-contextagent}}"
   local pg_bin_dir=""
+  local initdb_bin=""
+  local pg_ctl_bin=""
+  local pg_isready_bin=""
+  local createdb_bin=""
+  local psql_bin=""
 
   mkdir -p "$pg_root"
 
@@ -70,35 +122,58 @@ setup_pgvector_backend() {
           die "未找到可用的 pgvector 扩展包，请手动安装 pgvector 后重试。"
         fi
       fi
-      pg_bin_dir="$(dirname "$(command -v initdb)")"
+      pg_bin_dir="$(find_linux_pg_bin_dir)" || die "未找到 PostgreSQL 服务端二进制目录，请确认已安装 postgresql 服务端包。"
+      if [[ "$(id -u)" -eq 0 ]]; then
+        pg_user="${CA_PGVECTOR_USER:-postgres}"
+      fi
       ;;
     *)
       die "当前平台暂不支持 pgvector 自动安装：$(uname -s)"
       ;;
   esac
 
-  export PATH="$pg_bin_dir:$PATH"
+  initdb_bin="$pg_bin_dir/initdb"
+  pg_ctl_bin="$pg_bin_dir/pg_ctl"
+  pg_isready_bin="$pg_bin_dir/pg_isready"
+  createdb_bin="$pg_bin_dir/createdb"
+  psql_bin="$pg_bin_dir/psql"
+
+  [[ -x "$initdb_bin" ]] || die "未找到 initdb：$initdb_bin"
+  [[ -x "$pg_ctl_bin" ]] || die "未找到 pg_ctl：$pg_ctl_bin"
+  [[ -x "$pg_isready_bin" ]] || die "未找到 pg_isready：$pg_isready_bin"
+  [[ -x "$createdb_bin" ]] || die "未找到 createdb：$createdb_bin"
+  [[ -x "$psql_bin" ]] || die "未找到 psql：$psql_bin"
 
   if [[ ! -s "$pg_data_dir/PG_VERSION" ]]; then
     info "初始化本地 PostgreSQL 数据目录..."
-    initdb -D "$pg_data_dir" -U "$pg_user" --auth-local=trust --auth-host=trust >/dev/null
+    if [[ "$(id -u)" -eq 0 ]]; then
+      chown -R "$pg_user":"$pg_user" "$pg_root"
+      run_as_postgres_owner "$pg_user" "\"$initdb_bin\" -D \"$pg_data_dir\" -U \"$pg_user\" --auth-local=trust --auth-host=trust >/dev/null"
+    else
+      "$initdb_bin" -D "$pg_data_dir" -U "$pg_user" --auth-local=trust --auth-host=trust >/dev/null
+    fi
   fi
 
-  if ! pg_isready -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
+  if ! "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
     info "启动本地 PostgreSQL（端口 $pg_port）..."
-    pg_ctl -D "$pg_data_dir" -l "$pg_log_file" -o "-p $pg_port" start >/dev/null
+    if [[ "$(id -u)" -eq 0 ]]; then
+      chown -R "$pg_user":"$pg_user" "$pg_root"
+      run_as_postgres_owner "$pg_user" "\"$pg_ctl_bin\" -D \"$pg_data_dir\" -l \"$pg_log_file\" -o \"-p $pg_port\" start >/dev/null"
+    else
+      "$pg_ctl_bin" -D "$pg_data_dir" -l "$pg_log_file" -o "-p $pg_port" start >/dev/null
+    fi
   fi
 
   for _ in $(seq 1 20); do
-    if pg_isready -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
+    if "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
-  pg_isready -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，请查看日志：$pg_log_file"
+  "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，请查看日志：$pg_log_file"
 
-  createdb -h 127.0.0.1 -p "$pg_port" "$pg_db_name" >/dev/null 2>&1 || true
-  psql -h 127.0.0.1 -p "$pg_port" -d "$pg_db_name" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
+  "$createdb_bin" -h 127.0.0.1 -p "$pg_port" -U "$pg_user" "$pg_db_name" >/dev/null 2>&1 || true
+  "$psql_bin" -h 127.0.0.1 -p "$pg_port" -U "$pg_user" -d "$pg_db_name" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
 
   cat > "$CONFIG_PATH" <<EOF
 user_id: context-agent
