@@ -82,9 +82,19 @@ run_as_postgres_owner() {
   fi
 }
 
+backup_existing_config() {
+  local target_path="$1"
+  if [[ -f "$target_path" ]]; then
+    local backup_path="${target_path}.bak"
+    cp "$target_path" "$backup_path"
+    warn "检测到已有 openJiuwen 配置，已备份到：$backup_path"
+  fi
+}
+
 copy_example_config() {
-  local example_file="$PROJECT_DIR/examples/openjiuwen.$BACKEND.yaml.example"
+  local example_file="$PROJECT_DIR/examples/configs/$BACKEND/openjiuwen.yaml"
   [[ -f "$example_file" ]] || die "未找到示例配置：$example_file"
+  backup_existing_config "$CONFIG_PATH"
   cp "$example_file" "$CONFIG_PATH"
   success "已生成 openJiuwen 配置：$CONFIG_PATH"
 }
@@ -202,6 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_ltm_memory_scope_id ON ltm_memory(scope_id);
 CREATE INDEX IF NOT EXISTS idx_ltm_memory_memory_type ON ltm_memory(memory_type);
 SQL
 
+  backup_existing_config "$CONFIG_PATH"
   cat > "$CONFIG_PATH" <<EOF
 user_id: context-agent
 

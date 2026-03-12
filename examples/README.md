@@ -1,13 +1,13 @@
 # Examples 目录说明
 
-本目录提供一组面向不同能力面的示例，帮助你快速理解 ContextAgent 在**上下文聚合、压缩、工具治理、子代理隔离、业务 Agent 集成**以及 **openJiuwen / pgvector 配置**上的典型用法。
+本目录提供一组面向不同能力面的示例，帮助你快速理解 ContextAgent 在**上下文聚合、压缩、工具治理、子代理隔离、业务 Agent 集成**以及 **双配置文件（ContextAgent + openJiuwen）**上的典型用法。
 
 ## 使用建议
 
 - 大多数 `.py` 示例都可以直接运行：`python examples/<file>.py`
 - 这些 Python 示例默认以 **stub / in-memory** 方式演示能力，不要求先完成 openJiuwen 安装
-- `openjiuwen.*.yaml.example` 是配置模板，不是可直接运行的脚本
-- 如果你想接入真实长期记忆，请优先使用 openJiuwen 配置文件，并通过 `CA_OPENJIUWEN_CONFIG_PATH` 传入
+- `examples/configs/<backend>/` 下提供标准命名的配置样例，每个场景目录都直接包含 `context_agent.yaml` 和 `openjiuwen.yaml`
+- 如果你想接入真实长期记忆，优先使用正式配置 `config/context_agent.yaml` 与 `config/openjiuwen.yaml`；示例目录主要用于理解不同后端/场景如何填写
 
 ## 示例总览
 
@@ -18,9 +18,9 @@
 | `tool_governance.py` | 工具选择、工具上下文裁剪 | 大工具集场景，避免上下文膨胀 | 修改 `ToolDefinition`、扩展 `task_type`、替换工具描述和分类 |
 | `sub_agent_delegation.py` | 子代理上下文隔离、暴露控制、结果回流 | 主 Agent 向子 Agent 委派任务 | 修改 `ExposurePolicy`、替换 parent snapshot、调整 child 可见 source types |
 | `business_agent.py` | 业务 Agent 综合集成 | CRM / support / enterprise agent 原型 | 替换 CRM stub 数据、注入真实 LTM、替换压缩策略、接入真实工具治理 |
-| `openjiuwen.pgvector.yaml.example` | openJiuwen + pgvector 默认配置模板 | 本地 / 默认部署 | 修改 `dsn`、embedding 维度、索引参数、模型配置 |
-| `openjiuwen.qdrant.yaml.example` | openJiuwen + qdrant 配置模板 | 轻量试验环境 | 修改 host/port/collection、模型配置 |
-| `openjiuwen.milvus.yaml.example` | openJiuwen + milvus 配置模板 | 高吞吐向量检索场景 | 修改 `uri`、collection、index/search 参数 |
+| `configs/pgvector/context_agent.yaml` + `configs/pgvector/openjiuwen.yaml` | 默认 pgvector 双配置样例 | 本地 / 默认部署 | 修改端口、日志、DSN、embedding 维度、索引参数、模型配置 |
+| `configs/qdrant/context_agent.yaml` + `configs/qdrant/openjiuwen.yaml` | qdrant 双配置样例 | 轻量试验环境 | 修改 host/port/collection、模型配置、服务参数 |
+| `configs/milvus/context_agent.yaml` + `configs/milvus/openjiuwen.yaml` | milvus 双配置样例 | 高吞吐向量检索场景 | 修改 `uri`、collection、index/search 参数、服务参数 |
 
 ## Python 示例详解
 
@@ -129,37 +129,43 @@
 - 把 `SUPPORT_TOOLS` 换成你的业务工具集
 - 在 `handle_enquiry()` 中接入真实大模型调用
 
-## openJiuwen 配置模板详解
+## 标准双配置样例详解
 
-### `openjiuwen.pgvector.yaml.example`
+### `configs/pgvector/`
 
-这是默认推荐模板，演示：
+这个目录演示默认推荐的 **pgvector 双配置**：
 
-- openJiuwen 如何连接 `pgvector`
-- `vector_store` 中与 PostgreSQL / pgvector 相关的关键字段
-- embedding / LLM / memory 配置的基本结构
+- `context_agent.yaml`：ContextAgent 服务配置
+- `openjiuwen.yaml`：openJiuwen 的 LLM / embedding / vector / memory 配置
 
-建议优先定制这些字段：
+重点字段：
 
-- `vector_store.dsn`
-- `vector_store.embedding_dimension`
-- `vector_store.index_type`
-- `llm_config`
-- `embedding_config`
+- `context_agent.yaml`
+  - `http_port`
+  - `log_level`
+  - `openjiuwen_config_path`
+- `openjiuwen.yaml`
+  - `vector_store.dsn`
+  - `vector_store.embedding_dimension`
+  - `vector_store.index_type`
+  - `llm_config`
+  - `embedding_config`
 
-### `openjiuwen.qdrant.yaml.example`
+### `configs/qdrant/`
 
 适合轻量试验环境，重点看：
 
-- `host` / `port`
+- `context_agent.yaml` 中的服务参数是否需要调整
+- `openjiuwen.yaml` 中的 `host` / `port`
 - `collection_name`
-- payload / 元数据字段设计
+- 模型与 embedding 配置
 
-### `openjiuwen.milvus.yaml.example`
+### `configs/milvus/`
 
 适合更高吞吐或更独立的向量服务部署，重点看：
 
-- `uri`
+- `context_agent.yaml` 中的服务参数是否需要调整
+- `openjiuwen.yaml` 中的 `uri`
 - `collection_name`
 - `index_type`
 - `index_params`
@@ -177,9 +183,10 @@
 
 如果你要接入真实长期记忆：
 
-1. 先准备 `examples/openjiuwen.pgvector.yaml.example` 对应的配置
-2. 设置 `CA_OPENJIUWEN_CONFIG_PATH`
-3. 通过 `context_agent.config.openjiuwen.build_default_api_router()` 或你自己的启动入口装配
+1. 先查看正式默认配置：`config/context_agent.yaml` 与 `config/openjiuwen.yaml`
+2. 如果需要切换后端，再参考 `examples/configs/<backend>/` 下的标准样例
+3. 需要覆盖路径时，可设置 `CA_CONTEXT_AGENT_CONFIG_PATH` / `CA_OPENJIUWEN_CONFIG_PATH`
+4. 通过 `context_agent.config.openjiuwen.build_default_api_router()` 或你自己的启动入口装配
 
 ## 定制时的几个注意点
 

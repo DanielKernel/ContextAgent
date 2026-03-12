@@ -310,18 +310,9 @@ context_text = result["output"]["content"]
 ### 5.1 LTM 适配器
 
 ```python
-from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
-from openjiuwen.core.memory.long_term_memory import LongTermMemory
+from context_agent.config.openjiuwen import build_openjiuwen_ltm_adapter
 
-openjiuwen_cfg = {
-    "user_id": "agent-001",
-    "llm_config": {...},
-    "vector_store": {...},
-}
-
-# 不同 openJiuwen 版本的初始化入口可能是位置参数、config= 或 from_config(...)
-ltm = LongTermMemory(openjiuwen_cfg)
-ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
+ltm_adapter = build_openjiuwen_ltm_adapter("config/openjiuwen.yaml")
 ```
 
 ### 5.1.1 设计边界：长期记忆必须通过 openJiuwen 接入
@@ -628,11 +619,34 @@ openjiuwen_ltm_config = {
 2. 不同环境不要混用维度不同的 embedding 模型。
 3. 如果更换 embedding 模型，通常需要重建索引或重新写入历史向量。
 
-### 5.1.5 推荐的 openJiuwen 配置文件写法
+### 5.1.5 推荐的双配置文件写法
 
-若你们将 openJiuwen 配置独立维护，建议放到单独文件中，例如 `config/openjiuwen.yaml` 或 `config/openjiuwen.json`，再由 ContextAgent 在启动时读取。
+当前项目建议把 **ContextAgent** 与 **openJiuwen** 的配置拆成两份标准文件：
 
-通用示例：
+- `config/context_agent.yaml`
+- `config/openjiuwen.yaml`
+
+其中：
+
+- `context_agent.yaml` 负责服务端口、日志、认证、预算等 ContextAgent 自身配置
+- `openjiuwen.yaml` 负责模型、embedding、向量库与记忆策略
+
+`config/context_agent.yaml` 示例：
+
+```yaml
+service_name: context-agent
+environment: development
+log_level: INFO
+http_host: 0.0.0.0
+http_port: 8080
+openjiuwen_config_path: openjiuwen.yaml
+default_token_budget: 4096
+memory_worker_count: 2
+auth_enabled: false
+api_keys: []
+```
+
+`config/openjiuwen.yaml` 示例：
 
 ```yaml
 user_id: context-agent
@@ -655,7 +669,7 @@ embedding_config:
 
 vector_store:
   backend: pgvector
-  dsn: postgresql://postgres:password@127.0.0.1:5432/context_agent?sslmode=disable
+  dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable
   table_name: ltm_memory
   embedding_dimension: 3072
   distance: cosine
@@ -669,31 +683,147 @@ memory_config:
   enable_summary_memory: true
 ```
 
-默认 pgvector 示例见：`examples/openjiuwen.pgvector.yaml.example`
+正式默认配置见：
 
-可选后端示例：
+- `config/context_agent.yaml`
+- `config/openjiuwen.yaml`
 
-- `examples/openjiuwen.qdrant.yaml.example`
-- `examples/openjiuwen.milvus.yaml.example`
+按后端分类的标准样例见：
 
-### 5.1.6 在 ContextAgent 中加载 openJiuwen 配置
+- `examples/configs/pgvector/context_agent.yaml`
+- `examples/configs/pgvector/openjiuwen.yaml`
+- `examples/configs/qdrant/context_agent.yaml`
+- `examples/configs/qdrant/openjiuwen.yaml`
+- `examples/configs/milvus/context_agent.yaml`
+- `examples/configs/milvus/openjiuwen.yaml`
+
+#### 5.1.5.1 配置归属边界
+
+| 配置文件 | 负责范围 | 已由 ContextAgent 自动接管 | 仍需用户/部署方填写 |
+| --- | --- | --- | --- |
+| `config/context_agent.yaml` | 服务启动、日志、认证、预算、异步处理、观测 | 自动发现默认路径、相对路径解析、环境变量覆盖、默认开发值 | 生产环境端口、认证密钥、Redis/S3 地址、观测端点 |
+| `config/openjiuwen.yaml` | openJiuwen 的模型、embedding、长期记忆、向量库 | 自动发现默认路径、在启动阶段装配 `OpenJiuwenLTMAdapter`、默认 pgvector 基线 | API Key、真实模型地址、向量库连接、维度匹配、是否启用各类记忆 |
+
+规则：
+
+1. `context_agent.yaml` 中只保留 `openjiuwen_config_path` 这样的**引用关系**，不展开 `llm_config` / `vector_store` 等 openJiuwen 键。
+2. `openjiuwen.yaml` 中不放 `http_port`、`auth_enabled` 这类 ContextAgent 服务配置。
+3. 环境变量仍保留为覆盖层，但正式运行默认优先读取 `config/` 下两份标准配置。
+
+#### 5.1.5.2 `context_agent.yaml` 字段总表
+
+| 字段 | 类型 | 默认建议 | 是否必填 | 影响能力 | 默认原因 | 是否已接管 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `service_name` | `str` | `context-agent` | 否 | 服务标识、日志归属 | 与项目名一致，便于观测检索 | 是 |
+| `environment` | `str` | `development` | 否 | 环境区分 | 本地开发默认安全 | 是 |
+| `log_level` | `str` | `INFO` | 否 | 日志详细度 | 兼顾排障与噪声控制 | 是 |
+| `debug` | `bool` | `false` | 否 | 调试行为 | 生产安全默认关闭 | 是 |
+| `http_host` | `str` | `0.0.0.0` | 否 | HTTP 监听地址 | 本地容器/宿主都易接入 | 是 |
+| `http_port` | `int` | `8080` | 否 | HTTP 服务端口 | 与项目现有服务默认一致 | 是 |
+| `redis_url` | `str` | `redis://localhost:6379/0` | 否 | Hot tier / 缓存 | 本地开发最低门槛 | 否 |
+| `redis_pool_max_connections` | `int` | `50` | 否 | Redis 并发 | 中小规模场景通用 | 是 |
+| `s3_endpoint_url` | `str` | `""` | 否 | 版本快照外存 | 空值表示不开启外部对象存储 | 否 |
+| `s3_bucket` | `str` | `context-agent-versions` | 否 | 版本快照命名 | 表意清晰 | 否 |
+| `s3_access_key` | `str` | `""` | 否 | 对象存储认证 | 敏感项不应写死 | 否 |
+| `s3_secret_key` | `str` | `""` | 否 | 对象存储认证 | 敏感项不应写死 | 否 |
+| `llm_base_url` | `str` | `http://localhost:11434` | 否 | 项目内压缩/摘要 LLM | 保持本地开发可跑 | 否 |
+| `llm_model` | `str` | `qwen2.5:7b` | 否 | 项目内压缩/摘要 LLM | 与本地 Ollama 路径兼容 | 否 |
+| `llm_timeout_s` | `float` | `30.0` | 否 | LLM 请求超时 | 控制阻塞时间 | 是 |
+| `llm_max_retries` | `int` | `2` | 否 | LLM 重试 | 降低瞬时失败影响 | 是 |
+| `openjiuwen_config_path` | `str` | `openjiuwen.yaml` | 是 | openJiuwen 配置发现 | 保持双配置文件同目录开箱即用 | 是 |
+| `hot_tier_timeout_ms` | `float` | `20.0` | 否 | Hot tier 时延预算 | 对齐架构目标 | 是 |
+| `warm_tier_timeout_ms` | `float` | `100.0` | 否 | Warm tier 时延预算 | 对齐架构目标 | 是 |
+| `cold_tier_timeout_ms` | `float` | `300.0` | 否 | Cold tier 时延预算 | 对齐架构目标 | 是 |
+| `aggregation_timeout_ms` | `float` | `200.0` | 否 | 聚合总预算 | 控制主路径延迟 | 是 |
+| `default_token_budget` | `int` | `4096` | 否 | 默认注入 token 预算 | 适合多数对话场景 | 是 |
+| `tool_result_token_limit` | `int` | `1024` | 否 | 工具结果裁剪 | 防止工具输出挤占上下文 | 是 |
+| `memory_queue_maxsize` | `int` | `1000` | 否 | 异步记忆写入队列 | 兼顾吞吐与内存 | 是 |
+| `memory_worker_count` | `int` | `2` | 否 | 异步记忆 worker 数 | 本地默认轻量稳定 | 是 |
+| `otlp_endpoint` | `str` | `""` | 否 | OTLP 观测导出 | 空值表示不开启 | 否 |
+| `prometheus_enabled` | `bool` | `true` | 否 | 指标暴露 | 默认保留观测入口 | 是 |
+| `metrics_prefix` | `str` | `context_agent` | 否 | 指标命名空间 | 防止与其他服务冲突 | 是 |
+| `auth_enabled` | `bool` | `false` | 否 | API 鉴权 | 本地开发默认关闭 | 是 |
+| `auth_secret_key` | `str` | `""` | 否 | 鉴权密钥 | 敏感项不应写死 | 否 |
+| `api_keys` | `list[str]` | `[]` | 条件必填 | Bearer Token 鉴权 | 仅启用鉴权时需要填写 | 否 |
+
+填写建议：
+
+- 本地开发最少只要确认 `openjiuwen_config_path` 与 `http_port`。
+- 生产环境优先补齐 `auth_*`、Redis/S3、观测端点。
+- 除非明确需要，不建议在 `context_agent.yaml` 中重复填写 openJiuwen 的模型与向量库字段。
+
+#### 5.1.5.3 `openjiuwen.yaml` 字段总表
+
+| 字段 | 类型 | 默认建议 | 是否必填 | 影响能力 | 默认原因 | 是否已接管 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `user_id` | `str` | `context-agent` | 是 | 默认身份/记忆命名空间 | 便于单机场景直接运行 | 否 |
+| `llm_config.provider` | `str` | `openai` | 是 | 长期记忆提取、摘要、冲突检查 | 与示例 API 生态兼容 | 否 |
+| `llm_config.model` | `str` | `gpt-4o-mini` | 是 | 长期记忆生成质量/成本 | 兼顾成本与效果 | 否 |
+| `llm_config.api_key` | `str` | `${OPENAI_API_KEY}` | 是 | 上游 LLM 调用 | 敏感项通过环境注入 | 否 |
+| `llm_config.base_url` | `str` | `https://api.openai.com/v1` | 是 | 上游 LLM 地址 | 默认指向官方兼容接口 | 否 |
+| `llm_config.timeout` | `int` | `30` | 否 | 上游 LLM 超时 | 避免长时间阻塞 | 否 |
+| `llm_config.max_retries` | `int` | `2` | 否 | 上游 LLM 重试 | 降低瞬时失败影响 | 否 |
+| `embedding_config.provider` | `str` | `openai` | 是 | 向量化提供者 | 与默认模型栈一致 | 否 |
+| `embedding_config.model` | `str` | `text-embedding-3-large` | 是 | 向量写入/检索质量 | 与 3072 维 pgvector 模板对齐 | 否 |
+| `embedding_config.api_key` | `str` | `${OPENAI_API_KEY}` | 是 | embedding 调用 | 敏感项通过环境注入 | 否 |
+| `embedding_config.base_url` | `str` | `https://api.openai.com/v1` | 是 | embedding 地址 | 默认指向官方兼容接口 | 否 |
+| `embedding_config.dimension` | `int` | `3072` | 是 | 向量维度匹配 | 与默认模型、表结构一致 | 否 |
+| `embedding_config.batch_size` | `int` | `32` | 否 | 写入批次大小 | 兼顾吞吐与稳定性 | 否 |
+| `vector_store.backend` | `str` | `pgvector` | 是 | 选择向量后端 | 默认推荐后端 | 是（默认推荐） |
+| `vector_store.dsn` | `str` | `postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable` | pgvector 必填 | pgvector 连接 | 对齐安装脚本默认端口 | 否 |
+| `vector_store.schema` | `str` | `public` | pgvector 推荐 | pgvector 表空间 | PostgreSQL 通用默认 | 否 |
+| `vector_store.table_name` | `str` | `ltm_memory` | pgvector 必填 | 长期记忆表名 | 与脚本初始化一致 | 是（脚本会初始化） |
+| `vector_store.embedding_dimension` | `int` | `3072` | pgvector/milvus 推荐 | 向量表/集合维度 | 必须与 embedding 一致 | 否 |
+| `vector_store.distance` | `str` | `cosine` | pgvector/qdrant 推荐 | 相似度度量 | 通用语义检索默认 | 否 |
+| `vector_store.index_type` | `str` | `ivfflat` / `HNSW` | 否 | 检索性能 | 匹配不同后端习惯 | 否 |
+| `vector_store.lists` | `int` | `100` | pgvector 推荐 | pgvector 索引调优 | 中小规模默认值 | 否 |
+| `vector_store.metadata_fields` | `list[str]` | `scope_id/session_id/memory_type/...` | pgvector 推荐 | 过滤与治理 | 保证隔离与类型治理 | 是（项目建议） |
+| `vector_store.host` | `str` | `127.0.0.1` | qdrant 必填 | qdrant 地址 | 本地开发默认 | 否 |
+| `vector_store.port` | `int` | `6333` | qdrant 必填 | qdrant 地址 | 官方默认端口 | 否 |
+| `vector_store.api_key` | `str` | `""` | qdrant 可选 | qdrant 认证 | 本地可空 | 否 |
+| `vector_store.https` | `bool` | `false` | qdrant 可选 | qdrant 传输安全 | 本地开发默认关闭 | 否 |
+| `vector_store.collection_name` | `str` | `context_agent_memory` | qdrant/milvus 必填 | 集合名称 | 语义明确 | 否 |
+| `vector_store.uri` | `str` | `http://127.0.0.1:19530` | milvus 必填 | milvus 地址 | 官方默认端口 | 否 |
+| `vector_store.token` | `str` | `""` | milvus 可选 | milvus 认证 | 本地可空 | 否 |
+| `vector_store.metric_type` | `str` | `COSINE` | milvus 推荐 | milvus 相似度度量 | 与语义检索习惯一致 | 否 |
+| `vector_store.index_params` | `dict` | `{M:16, efConstruction:200}` | milvus 推荐 | milvus 建索引参数 | 当前示例平衡吞吐与质量 | 否 |
+| `vector_store.search_params` | `dict` | `{ef:64}` | milvus 推荐 | milvus 搜索参数 | 当前示例平衡吞吐与质量 | 否 |
+| `memory_config.top_k` | `int` | `10` | 否 | 默认召回条数 | 适合多数上下文注入场景 | 否 |
+| `memory_config.score_threshold` | `float` | `0.3` | 否 | 过滤低相关记忆 | 降低噪声召回 | 否 |
+| `memory_config.enable_user_profile` | `bool` | `true` | 否 | 用户画像记忆 | 默认保留长期偏好 | 否 |
+| `memory_config.enable_semantic_memory` | `bool` | `true` | 否 | 事实/语义记忆 | 默认保留知识型记忆 | 否 |
+| `memory_config.enable_episodic_memory` | `bool` | `true` | 否 | 情节/事件记忆 | 默认保留任务过程结论 | 否 |
+| `memory_config.enable_summary_memory` | `bool` | `true` | 否 | 摘要记忆 | 默认保留长会话压缩能力 | 否 |
+
+填写建议：
+
+- `llm_config` 与 `embedding_config` 至少要有一套可用的真实凭据，否则长期记忆只能退化。
+- `embedding_config.dimension`、`vector_store.embedding_dimension`、向量表/集合维度必须一致。
+- 切换后端时，只改 `openjiuwen.yaml`；不要把数据库连接信息移回 `context_agent.yaml`。
+- 若你们使用的是不同 openJiuwen 版本，字段名以该版本 typed config 为准，但仍建议保持这份文件的分层结构不变。
+
+### 5.1.6 在 ContextAgent 中自动加载配置
 
 ```python
-from pathlib import Path
-import yaml
+from context_agent.config.settings import get_settings
+from context_agent.config.openjiuwen import build_default_api_router
 
-from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
-from openjiuwen.core.memory.long_term_memory import LongTermMemory
-
-cfg = yaml.safe_load(Path("config/openjiuwen.yaml").read_text())
-
-ltm = LongTermMemory(cfg)
-ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
+settings = get_settings()
+router = build_default_api_router(settings=settings)
 ```
 
-若使用本项目 `Settings`，建议通过 `CA_OPENJIUWEN_CONFIG_PATH` 指向该配置文件，再在应用启动阶段统一加载。
+默认情况下，启动链路会：
 
-当前项目默认启动路径已经支持这一做法：只要设置 `CA_OPENJIUWEN_CONFIG_PATH`，`context_agent.api.http_handler` 就会在启动时加载 openJiuwen 配置并注入 `OpenJiuwenLTMAdapter`。
+1. 自动读取 `config/context_agent.yaml`
+2. 再根据其中的 `openjiuwen_config_path` 读取 `config/openjiuwen.yaml`
+3. 最后装配 `OpenJiuwenLTMAdapter`
+
+若需要覆盖默认路径，可通过：
+
+- `CA_CONTEXT_AGENT_CONFIG_PATH`
+- `CA_OPENJIUWEN_CONFIG_PATH`
+
+进行显式指定。
 
 ### 5.1.7 默认记忆编排链路
 
@@ -787,12 +917,11 @@ ce_adapter = OpenJiuwenContextEngineAdapter(
 
 ```python
 from context_agent import ContextAPIRouter, ContextAggregator
-from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from context_agent.adapters.retriever_adapter import OpenJiuwenRetrieverAdapter
+from context_agent.config.openjiuwen import build_openjiuwen_ltm_adapter
 from context_agent.core.memory.tiered_router import TieredMemoryRouter
 from context_agent.core.context.jit_resolver import JITResolver
 import redis.asyncio as aioredis
-from openjiuwen.core.memory.long_term_memory import LongTermMemory
 from openjiuwen.core.retrieval.retriever.hybrid_retriever import HybridRetriever
 from openjiuwen.core.retrieval.reranker import StandardReranker
 
@@ -819,11 +948,10 @@ openjiuwen_cfg = {
     },
 }
 
-openjiuwen_ltm = LongTermMemory(openjiuwen_cfg)
 openjiuwen_retriever = HybridRetriever(config=openjiuwen_cfg)
 openjiuwen_reranker = StandardReranker(config=openjiuwen_cfg)
 
-ltm_adapter = OpenJiuwenLTMAdapter(ltm=openjiuwen_ltm)
+ltm_adapter = build_openjiuwen_ltm_adapter("config/openjiuwen.yaml")
 retriever_adapter = OpenJiuwenRetrieverAdapter(
     hybrid_retriever=openjiuwen_retriever,
     reranker=openjiuwen_reranker,

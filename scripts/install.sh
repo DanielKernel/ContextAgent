@@ -8,6 +8,8 @@
 #    --port PORT    服务监听端口（默认 8000）
 #    --vector-backend BACKEND
 #                   openJiuwen 向量库后端（默认 pgvector，可选 qdrant / milvus）
+#    --context-agent-config PATH
+#                   ContextAgent 配置文件路径（默认 ./config/context_agent.yaml）
 #    --openjiuwen-config PATH
 #                   openJiuwen 配置文件路径（默认 ./config/openjiuwen.yaml）
 #    --help         显示帮助
@@ -20,6 +22,7 @@ VENV_DIR="$PROJECT_DIR/.venv"
 PORT=8000
 START_SERVICE=false
 VECTOR_BACKEND="pgvector"
+CONTEXT_AGENT_CONFIG_PATH="$PROJECT_DIR/config/context_agent.yaml"
 OPENJIUWEN_CONFIG_PATH="$PROJECT_DIR/config/openjiuwen.yaml"
 LOG_FILE="$PROJECT_DIR/context_agent.log"
 PID_FILE="$PROJECT_DIR/context_agent.pid"
@@ -39,12 +42,14 @@ while [[ $# -gt 0 ]]; do
     --start)       START_SERVICE=true; shift ;;
     --port)        PORT="$2"; shift 2 ;;
     --vector-backend) VECTOR_BACKEND="$2"; shift 2 ;;
+    --context-agent-config) CONTEXT_AGENT_CONFIG_PATH="$2"; shift 2 ;;
     --openjiuwen-config) OPENJIUWEN_CONFIG_PATH="$2"; shift 2 ;;
     --help|-h)
-      echo "用法: bash scripts/install.sh [--start] [--port PORT] [--vector-backend BACKEND] [--openjiuwen-config PATH]"
+      echo "用法: bash scripts/install.sh [--start] [--port PORT] [--vector-backend BACKEND] [--context-agent-config PATH] [--openjiuwen-config PATH]"
       echo "  --start       安装后自动在后台启动服务"
       echo "  --port PORT   服务端口（默认 8000）"
       echo "  --vector-backend BACKEND   向量库后端（默认 pgvector，可选 qdrant / milvus）"
+      echo "  --context-agent-config PATH   ContextAgent 配置文件输出路径"
       echo "  --openjiuwen-config PATH   openJiuwen 配置文件输出路径"
       exit 0 ;;
     *) die "未知参数: $1" ;;
@@ -77,6 +82,21 @@ if not updated:
 
 env_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 PY
+}
+
+ensure_context_agent_config() {
+  local target_path="$1"
+  local target_dir example_file
+  target_dir="$(dirname "$target_path")"
+  mkdir -p "$target_dir"
+  if [[ -f "$target_path" ]]; then
+    info "保留已有 ContextAgent 配置：$target_path"
+    return 0
+  fi
+  example_file="$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml"
+  [[ -f "$example_file" ]] || die "未找到 ContextAgent 默认配置模板：$example_file"
+  cp "$example_file" "$target_path"
+  success "已生成 ContextAgent 配置：$target_path"
 }
 
 echo ""
@@ -142,7 +162,12 @@ info "安装 ContextAgent 及 openJiuwen 依赖..."
 "$VENV_DIR/bin/pip" install -e "$PROJECT_DIR[openjiuwen]" -q --prefer-binary
 success "ContextAgent 安装完成"
 
-# ── 第 3.5 步：准备 openJiuwen 向量库配置 ───────────────────────────────────────
+# ── 第 3.5 步：准备 ContextAgent 与 openJiuwen 配置 ────────────────────────────
+info "准备 ContextAgent 主配置..."
+ensure_context_agent_config "$CONTEXT_AGENT_CONFIG_PATH"
+upsert_env_var "CA_CONTEXT_AGENT_CONFIG_PATH" "$CONTEXT_AGENT_CONFIG_PATH"
+success "ContextAgent 配置已就绪，已写入 .env：CA_CONTEXT_AGENT_CONFIG_PATH=$CONTEXT_AGENT_CONFIG_PATH"
+
 info "准备 openJiuwen 配置（向量库后端：$VECTOR_BACKEND）..."
 bash "$SCRIPT_DIR/setup-vector-backend.sh" \
   --backend "$VECTOR_BACKEND" \
@@ -170,6 +195,7 @@ if $START_SERVICE; then
     rm -f "$PID_FILE"
   fi
 
+  CA_CONTEXT_AGENT_CONFIG_PATH="$CONTEXT_AGENT_CONFIG_PATH" \
   CA_OPENJIUWEN_CONFIG_PATH="$OPENJIUWEN_CONFIG_PATH" \
   "$VENV_DIR/bin/python3" -m uvicorn context_agent.api.http_handler:app \
     --host 0.0.0.0 --port "$PORT" \
@@ -197,10 +223,12 @@ echo "║  ✅  安装成功！                            ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 echo "  手动启动服务："
+echo "    export CA_CONTEXT_AGENT_CONFIG_PATH=$CONTEXT_AGENT_CONFIG_PATH"
 echo "    export CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
 echo "    make run-dev"
 echo "  或："
 echo "    source .venv/bin/activate"
+echo "    export CA_CONTEXT_AGENT_CONFIG_PATH=$CONTEXT_AGENT_CONFIG_PATH"
 echo "    export CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
 echo "    python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port $PORT"
 echo ""

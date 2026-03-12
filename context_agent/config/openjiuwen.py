@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
 
 logger = get_logger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OPENJIUWEN_CONFIG_PATH = PROJECT_ROOT / "config" / "openjiuwen.yaml"
 
 
 def _instantiate_long_term_memory(long_term_memory_cls: type, config: dict[str, Any]) -> Any:
@@ -121,6 +124,18 @@ def load_openjiuwen_config(config_path: str | Path) -> dict[str, Any]:
     return data
 
 
+def resolve_openjiuwen_config_path(explicit_path: str | Path | None = None) -> Path | None:
+    """Resolve the openJiuwen config path from explicit value, env, or repo default."""
+    candidate_path = explicit_path or os.getenv("CA_OPENJIUWEN_CONFIG_PATH")
+    if candidate_path:
+        candidate = Path(candidate_path).expanduser()
+        return candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
+
+    if DEFAULT_OPENJIUWEN_CONFIG_PATH.is_file():
+        return DEFAULT_OPENJIUWEN_CONFIG_PATH.resolve()
+    return None
+
+
 def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapter:
     """Build an OpenJiuwenLTMAdapter from an openJiuwen config file."""
     config = load_openjiuwen_config(config_path)
@@ -165,17 +180,21 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     aggregator_kwargs["working_memory"] = working_memory
     router_kwargs["working_memory"] = working_memory
 
-    if runtime_settings.openjiuwen_config_path:
+    resolved_openjiuwen_config = resolve_openjiuwen_config_path(
+        runtime_settings.openjiuwen_config_path
+    )
+
+    if resolved_openjiuwen_config is not None:
         try:
             ltm_adapter = build_openjiuwen_ltm_adapter(
-                runtime_settings.openjiuwen_config_path
+                resolved_openjiuwen_config
             )
         except ContextAgentError as exc:
             if exc.code != ErrorCode.OPENJIUWEN_UNAVAILABLE:
                 raise
             logger.warning(
                 "openJiuwen long-term memory unavailable, starting with working memory only",
-                config_path=runtime_settings.openjiuwen_config_path,
+                config_path=str(resolved_openjiuwen_config),
                 error=str(exc),
                 details=exc.details,
             )
@@ -190,7 +209,7 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     else:
         logger.info(
             "starting without openJiuwen long-term memory",
-            reason="CA_OPENJIUWEN_CONFIG_PATH is not set",
+            reason="No openJiuwen config file was found",
         )
 
     return ContextAPIRouter(

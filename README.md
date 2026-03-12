@@ -24,7 +24,9 @@ bash scripts/setup-openclaw.sh
 
 就这两条命令。服务默认监听 `http://localhost:8000`，接入后 OpenClaw 会自动使用 ContextAgent 进行上下文管理。
 
-> ContextAgent **只通过 openJiuwen 配置对接向量数据库**。安装脚本默认生成 `config/openjiuwen.yaml` 并写入 `CA_OPENJIUWEN_CONFIG_PATH`，不会在业务代码中直连向量库。
+> ContextAgent 现在默认随代码发布两份标准配置：`config/context_agent.yaml` 和 `config/openjiuwen.yaml`。启动时会先读取 ContextAgent 配置，再按其中的 `openjiuwen_config_path` 自动加载 openJiuwen 配置。
+
+> ContextAgent **只通过 openJiuwen 配置对接向量数据库**，不会在业务代码中直连向量库。
 
 > **更多选项：**
 > ```bash
@@ -49,8 +51,7 @@ python3 -m venv .venv
 # 3) 激活虚拟环境（可选，便于手动执行命令）
 source .venv/bin/activate
 
-# 4) 指定 openJiuwen 配置并启动服务
-export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
+# 4) 直接启动服务（默认自动读取 config/context_agent.yaml -> config/openjiuwen.yaml）
 .venv/bin/python3 -m uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
 ```
 
@@ -58,7 +59,6 @@ export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
 
 ```bash
 make install        # 等价于：创建 .venv + pip install -e ".[dev,openjiuwen]"
-export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
 make run-dev        # 等价于：.venv/bin/python3 -m uvicorn ...
 make venv-test      # 在 .venv 中运行测试
 ```
@@ -78,11 +78,19 @@ bash scripts/install.sh --vector-backend qdrant
 bash scripts/install.sh --vector-backend milvus
 ```
 
-默认示例文件见：
+正式默认配置见：
 
-- `examples/openjiuwen.pgvector.yaml.example`
-- `examples/openjiuwen.qdrant.yaml.example`
-- `examples/openjiuwen.milvus.yaml.example`
+- `config/context_agent.yaml`
+- `config/openjiuwen.yaml`
+
+标准命名的示例场景见：
+
+- `examples/configs/pgvector/context_agent.yaml`
+- `examples/configs/pgvector/openjiuwen.yaml`
+- `examples/configs/qdrant/context_agent.yaml`
+- `examples/configs/qdrant/openjiuwen.yaml`
+- `examples/configs/milvus/context_agent.yaml`
+- `examples/configs/milvus/openjiuwen.yaml`
 
 ### 5 行接入
 
@@ -213,14 +221,16 @@ context_agent/
 
 ```bash
 # 方式一：Makefile（底层仍是 Python venv）
-export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
 make run-dev
 
 # 方式二：直接使用虚拟环境
-export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
 make venv-run
 
 # 手动启动（激活 .venv 后）
+python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port 8080
+
+# 如需覆盖默认配置路径，也可以显式指定
+export CA_CONTEXT_AGENT_CONFIG_PATH=config/context_agent.yaml
 export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
 python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port 8080
 

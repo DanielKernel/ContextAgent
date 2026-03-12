@@ -9,6 +9,7 @@ from context_agent.config.openjiuwen import (
     _instantiate_long_term_memory,
     build_default_api_router,
     load_openjiuwen_config,
+    resolve_openjiuwen_config_path,
 )
 from context_agent.config.settings import Settings
 from context_agent.utils.errors import ContextAgentError, ErrorCode
@@ -95,6 +96,33 @@ def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeyp
     assert router._working_memory is not None
     assert router._memory_orchestrator is None
     assert router._memory_processor is None
+
+
+def test_build_default_api_router_uses_default_openjiuwen_path(monkeypatch, tmp_path):
+    config_path = tmp_path / "openjiuwen.yaml"
+    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+    sentinel_adapter = object()
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.DEFAULT_OPENJIUWEN_CONFIG_PATH",
+        config_path,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
+        lambda path: sentinel_adapter,
+    )
+
+    router = build_default_api_router(settings=Settings(openjiuwen_config_path=""))
+
+    assert router._aggregator._ltm is sentinel_adapter
+
+
+def test_resolve_openjiuwen_config_path_uses_env(monkeypatch, tmp_path):
+    config_path = tmp_path / "openjiuwen.yaml"
+    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+    monkeypatch.setenv("CA_OPENJIUWEN_CONFIG_PATH", str(config_path))
+
+    assert resolve_openjiuwen_config_path() == config_path.resolve()
 
 
 def test_instantiate_long_term_memory_with_config_keyword():

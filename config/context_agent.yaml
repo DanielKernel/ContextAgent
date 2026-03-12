@@ -1,0 +1,41 @@
+service_name: context-agent
+environment: development
+log_level: INFO
+debug: false
+
+http_host: 0.0.0.0
+http_port: 8080
+
+redis_url: redis://localhost:6379/0
+redis_pool_max_connections: 50
+
+s3_endpoint_url: ""
+s3_bucket: context-agent-versions
+s3_access_key: ""
+s3_secret_key: ""
+
+llm_base_url: http://localhost:11434
+llm_model: qwen2.5:7b
+llm_timeout_s: 30.0
+llm_max_retries: 2
+
+openjiuwen_config_path: openjiuwen.yaml
+
+hot_tier_timeout_ms: 20.0
+warm_tier_timeout_ms: 100.0
+cold_tier_timeout_ms: 300.0
+aggregation_timeout_ms: 200.0
+
+default_token_budget: 4096
+tool_result_token_limit: 1024
+
+memory_queue_maxsize: 1000
+memory_worker_count: 2
+
+otlp_endpoint: ""
+prometheus_enabled: true
+metrics_prefix: context_agent
+
+auth_enabled: false
+auth_secret_key: ""
+api_keys: []
