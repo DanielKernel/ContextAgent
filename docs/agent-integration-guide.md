@@ -406,6 +406,7 @@ HTTP / OpenClaw ingest
 3. 然后看 `examples/configs/<backend>/`
 4. 如需接入 OpenClaw，再看 `docs/openclaw-integration.md`
 5. 如需理解测试范围，再看 `tests/README.md`
+6. 如需规划 benchmark 评测体系，再看 `docs/benchmark-evaluation-guide.md`
 
 ---
 

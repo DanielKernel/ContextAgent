@@ -145,6 +145,8 @@ asyncio.run(main())
 ```
 
 > 📖 **详细接入文档**：[docs/agent-integration-guide.md](docs/agent-integration-guide.md)
+>
+> 📊 **Benchmark 评测建议**：[docs/benchmark-evaluation-guide.md](docs/benchmark-evaluation-guide.md)
 
 ---
 
