@@ -6,7 +6,9 @@ import pytest
 
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
+    _expand_env_placeholders,
     _instantiate_long_term_memory,
+    _normalize_async_dsn,
     build_default_api_router,
     load_openjiuwen_config,
     resolve_openjiuwen_config_path,
@@ -175,3 +177,33 @@ def test_instantiate_long_term_memory_with_expanded_kwargs():
     assert instance.user_id == "u1"
     assert instance.vector_store == {"backend": "pgvector"}
     assert instance.llm_config == {"provider": "openai"}
+
+
+def test_instantiate_long_term_memory_with_no_arg_constructor():
+    class FakeLongTermMemory:
+        def __init__(self):
+            self.ready = True
+
+    instance = _instantiate_long_term_memory(FakeLongTermMemory, {"user_id": "u1"})
+    assert instance.ready is True
+
+
+def test_expand_env_placeholders_recursively(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    config = {
+        "llm_config": {"api_key": "${OPENAI_API_KEY}"},
+        "nested": ["${OPENAI_API_KEY}"],
+    }
+
+    expanded = _expand_env_placeholders(config)
+
+    assert expanded["llm_config"]["api_key"] == "secret"
+    assert expanded["nested"] == ["secret"]
+
+
+def test_normalize_async_dsn_for_postgres():
+    dsn = "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
+
+    normalized = _normalize_async_dsn(dsn)
+
+    assert normalized == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
