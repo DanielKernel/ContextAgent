@@ -182,7 +182,25 @@ setup_pgvector_backend() {
   "$pg_isready_bin" -h "$pg_socket_dir" -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，可能是端口 ${pg_port} 已被其他实例占用。请查看日志：${pg_log_file}"
 
   "$createdb_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" "$pg_db_name" >/dev/null 2>&1 || true
-  "$psql_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" -d "$pg_db_name" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
+  "$psql_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" -d "$pg_db_name" <<'SQL' >/dev/null
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS ltm_memory (
+    id BIGSERIAL PRIMARY KEY,
+    scope_id VARCHAR(128) NOT NULL,
+    session_id VARCHAR(128),
+    memory_type VARCHAR(32) NOT NULL DEFAULT 'semantic',
+    source VARCHAR(64),
+    content TEXT NOT NULL,
+    embedding vector(3072),
+    tags JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ltm_memory_scope_id ON ltm_memory(scope_id);
+CREATE INDEX IF NOT EXISTS idx_ltm_memory_memory_type ON ltm_memory(memory_type);
+SQL
 
   cat > "$CONFIG_PATH" <<EOF
 user_id: context-agent

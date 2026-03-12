@@ -32,7 +32,7 @@ class StrategyRegistry:
     def register(self, strategy: CompressionStrategy) -> None:
         sid = strategy.strategy_id
         if sid in self._strategies:
-            logger.warning("strategy already registered, overwriting", strategy_id=sid)
+            raise ValueError(f"Strategy '{sid}' already registered")
         self._strategies[sid] = strategy
         logger.info("strategy registered", strategy_id=sid)
 
@@ -43,6 +43,10 @@ class StrategyRegistry:
 
     def list_ids(self) -> list[str]:
         return list(self._strategies.keys())
+
+    def list(self) -> list[str]:
+        """Backward-compatible alias expected by scheduler/tests."""
+        return self.list_ids()
 
     def unregister(self, strategy_id: str) -> None:
         self._strategies.pop(strategy_id, None)
