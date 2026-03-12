@@ -42,6 +42,20 @@ def _instantiate_long_term_memory(long_term_memory_cls: type, config: dict[str, 
     if "cfg" in parameter_names:
         return long_term_memory_cls(cfg=config)
 
+    accepts_var_kwargs = (
+        init_signature is not None
+        and any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for name, parameter in init_signature.parameters.items()
+            if name != "self"
+        )
+    )
+    supported_kwargs = {
+        key: value for key, value in config.items() if key in parameter_names
+    }
+    if supported_kwargs and (accepts_var_kwargs or len(supported_kwargs) == len(config)):
+        return long_term_memory_cls(**supported_kwargs)
+
     if len(parameter_names) == 1:
         return long_term_memory_cls(config)
 

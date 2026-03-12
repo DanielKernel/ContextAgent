@@ -102,3 +102,22 @@ def test_instantiate_long_term_memory_with_factory_method():
 
     instance = _instantiate_long_term_memory(FakeLongTermMemory, {"user_id": "u1"})
     assert instance.config == {"user_id": "u1"}
+
+
+def test_instantiate_long_term_memory_with_expanded_kwargs():
+    class FakeLongTermMemory:
+        def __init__(self, user_id, vector_store, llm_config):
+            self.user_id = user_id
+            self.vector_store = vector_store
+            self.llm_config = llm_config
+
+    config = {
+        "user_id": "u1",
+        "vector_store": {"backend": "pgvector"},
+        "llm_config": {"provider": "openai"},
+    }
+    instance = _instantiate_long_term_memory(FakeLongTermMemory, config)
+
+    assert instance.user_id == "u1"
+    assert instance.vector_store == {"backend": "pgvector"}
+    assert instance.llm_config == {"provider": "openai"}
