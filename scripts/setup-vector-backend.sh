@@ -90,13 +90,14 @@ copy_example_config() {
 }
 
 setup_pgvector_backend() {
-  local pg_port="${CA_PGVECTOR_PORT:-5432}"
+  local pg_port="${CA_PGVECTOR_PORT:-55432}"
   local pg_db_name="${CA_PGVECTOR_DB:-context_agent}"
   local pg_user="${CA_PGVECTOR_USER:-${USER:-contextagent}}"
   local default_pg_root="$PROJECT_DIR/.local/postgres"
   local pg_root=""
   local pg_data_dir=""
   local pg_log_file=""
+  local pg_socket_dir=""
   local pg_bin_dir=""
   local initdb_bin=""
   local pg_ctl_bin=""
@@ -133,53 +134,55 @@ setup_pgvector_backend() {
   esac
 
   pg_root="${CA_PGVECTOR_ROOT:-$default_pg_root}"
-  pg_data_dir="$pg_root/data"
-  pg_log_file="$pg_root/postgresql.log"
+  pg_data_dir="${pg_root}/data"
+  pg_log_file="${pg_root}/postgresql.log"
+  pg_socket_dir="${pg_root}/socket"
 
   mkdir -p "$pg_root"
+  mkdir -p "$pg_socket_dir"
 
-  initdb_bin="$pg_bin_dir/initdb"
-  pg_ctl_bin="$pg_bin_dir/pg_ctl"
-  pg_isready_bin="$pg_bin_dir/pg_isready"
-  createdb_bin="$pg_bin_dir/createdb"
-  psql_bin="$pg_bin_dir/psql"
+  initdb_bin="${pg_bin_dir}/initdb"
+  pg_ctl_bin="${pg_bin_dir}/pg_ctl"
+  pg_isready_bin="${pg_bin_dir}/pg_isready"
+  createdb_bin="${pg_bin_dir}/createdb"
+  psql_bin="${pg_bin_dir}/psql"
 
-  [[ -x "$initdb_bin" ]] || die "未找到 initdb：$initdb_bin"
-  [[ -x "$pg_ctl_bin" ]] || die "未找到 pg_ctl：$pg_ctl_bin"
-  [[ -x "$pg_isready_bin" ]] || die "未找到 pg_isready：$pg_isready_bin"
-  [[ -x "$createdb_bin" ]] || die "未找到 createdb：$createdb_bin"
-  [[ -x "$psql_bin" ]] || die "未找到 psql：$psql_bin"
+  [[ -x "$initdb_bin" ]] || die "未找到 initdb：${initdb_bin}"
+  [[ -x "$pg_ctl_bin" ]] || die "未找到 pg_ctl：${pg_ctl_bin}"
+  [[ -x "$pg_isready_bin" ]] || die "未找到 pg_isready：${pg_isready_bin}"
+  [[ -x "$createdb_bin" ]] || die "未找到 createdb：${createdb_bin}"
+  [[ -x "$psql_bin" ]] || die "未找到 psql：${psql_bin}"
 
-  if [[ ! -s "$pg_data_dir/PG_VERSION" ]]; then
+  if [[ ! -s "${pg_data_dir}/PG_VERSION" ]]; then
     info "初始化本地 PostgreSQL 数据目录..."
     if [[ "$(id -u)" -eq 0 ]]; then
-      chown -R "$pg_user":"$pg_user" "$pg_root"
+      chown -R "${pg_user}:${pg_user}" "$pg_root"
       run_as_postgres_owner "$pg_user" "\"$initdb_bin\" -D \"$pg_data_dir\" -U \"$pg_user\" --auth-local=trust --auth-host=trust >/dev/null"
     else
       "$initdb_bin" -D "$pg_data_dir" -U "$pg_user" --auth-local=trust --auth-host=trust >/dev/null
     fi
   fi
 
-  if ! "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
-    info "启动本地 PostgreSQL（端口 $pg_port）..."
+  if ! "$pg_isready_bin" -h "$pg_socket_dir" -p "$pg_port" >/dev/null 2>&1; then
+    info "启动本地 PostgreSQL（端口 ${pg_port}）..."
     if [[ "$(id -u)" -eq 0 ]]; then
-      chown -R "$pg_user":"$pg_user" "$pg_root"
-      run_as_postgres_owner "$pg_user" "\"$pg_ctl_bin\" -D \"$pg_data_dir\" -l \"$pg_log_file\" -o \"-p $pg_port\" start >/dev/null"
+      chown -R "${pg_user}:${pg_user}" "$pg_root"
+      run_as_postgres_owner "$pg_user" "\"$pg_ctl_bin\" -D \"$pg_data_dir\" -l \"$pg_log_file\" -o \"-p $pg_port -k $pg_socket_dir\" start >/dev/null"
     else
-      "$pg_ctl_bin" -D "$pg_data_dir" -l "$pg_log_file" -o "-p $pg_port" start >/dev/null
+      "$pg_ctl_bin" -D "$pg_data_dir" -l "$pg_log_file" -o "-p $pg_port -k $pg_socket_dir" start >/dev/null
     fi
   fi
 
   for _ in $(seq 1 20); do
-    if "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
+    if "$pg_isready_bin" -h "$pg_socket_dir" -p "$pg_port" >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
-  "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，请查看日志：$pg_log_file"
+  "$pg_isready_bin" -h "$pg_socket_dir" -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，可能是端口 ${pg_port} 已被其他实例占用。请查看日志：${pg_log_file}"
 
-  "$createdb_bin" -h 127.0.0.1 -p "$pg_port" -U "$pg_user" "$pg_db_name" >/dev/null 2>&1 || true
-  "$psql_bin" -h 127.0.0.1 -p "$pg_port" -U "$pg_user" -d "$pg_db_name" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
+  "$createdb_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" "$pg_db_name" >/dev/null 2>&1 || true
+  "$psql_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" -d "$pg_db_name" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null
 
   cat > "$CONFIG_PATH" <<EOF
 user_id: context-agent
@@ -202,7 +205,7 @@ embedding_config:
 
 vector_store:
   backend: pgvector
-  dsn: postgresql://$pg_user@127.0.0.1:$pg_port/$pg_db_name?sslmode=disable
+  dsn: postgresql://${pg_user}@127.0.0.1:${pg_port}/${pg_db_name}?sslmode=disable
   schema: public
   table_name: ltm_memory
   embedding_dimension: 3072
@@ -227,7 +230,7 @@ memory_config:
   enable_summary_memory: true
 EOF
 
-  success "pgvector 已完成本地初始化，openJiuwen 配置已写入：$CONFIG_PATH"
+  success "pgvector 已完成本地初始化，openJiuwen 配置已写入：${CONFIG_PATH}"
 }
 
 case "$BACKEND" in
