@@ -199,7 +199,7 @@ mark_used() → active_count += 1（被用到的片段热度上升）
 
 ### 4.5 默认部署边界
 
-若启用了 `config/context_agent.yaml` 中的 `openjiuwen_config_path`，或显式设置了 `CA_OPENJIUWEN_CONFIG_PATH`：
+若启用了 `config/context_agent.yaml` 中的 `integrations.openjiuwen.config_path`，或显式设置了 `CA_OPENJIUWEN_CONFIG_PATH`：
 
 - ContextAgent 启动时会装配 `WorkingMemoryManager`
 - 同时创建 `MemoryOrchestrator` 与 `AsyncMemoryProcessor`

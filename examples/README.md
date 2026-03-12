@@ -141,9 +141,9 @@
 重点字段：
 
 - `context_agent.yaml`
-  - `http_port`
-  - `log_level`
-  - `openjiuwen_config_path`
+  - `http.port`
+  - `service.log_level`
+  - `integrations.openjiuwen.config_path`
 - `openjiuwen.yaml`
   - `vector_store.dsn`
   - `vector_store.embedding_dimension`
@@ -155,7 +155,7 @@
 
 适合轻量试验环境，重点看：
 
-- `context_agent.yaml` 中的服务参数是否需要调整
+- `context_agent.yaml` 中的分段服务参数是否需要调整
 - `openjiuwen.yaml` 中的 `host` / `port`
 - `collection_name`
 - 模型与 embedding 配置
@@ -164,7 +164,7 @@
 
 适合更高吞吐或更独立的向量服务部署，重点看：
 
-- `context_agent.yaml` 中的服务参数是否需要调整
+- `context_agent.yaml` 中的分段服务参数是否需要调整
 - `openjiuwen.yaml` 中的 `uri`
 - `collection_name`
 - `index_type`

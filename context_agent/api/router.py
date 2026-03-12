@@ -115,6 +115,7 @@ class ContextAPIRouter:
                     session_id=snapshot.session_id,
                     items=view.visible_items,
                     total_tokens=sum(len(i.content) // 4 for i in view.visible_items),
+                    token_budget=token_budget,
                     query=snapshot.query,
                 )
                 if view.hidden_item_count > 0:

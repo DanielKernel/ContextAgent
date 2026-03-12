@@ -6,6 +6,7 @@ import pytest
 
 from context_agent.models.context import ContextItem, ContextOutput, ContextSnapshot, OutputType
 from context_agent.strategies.base import CompressionStrategy
+from context_agent.strategies.qa_strategy import QACompressionStrategy
 from context_agent.strategies.registry import (
     StrategyRegistry,
     ensure_default_strategies_registered,
@@ -99,3 +100,17 @@ class TestDoubleStrategy:
         snap = _make_snapshot(["hello world"])
         snap.total_tokens = 99
         assert strat.estimate_tokens(snap) == 99
+
+
+class TestBuiltinStrategies:
+    @pytest.mark.asyncio
+    async def test_qa_strategy_returns_context_output(self):
+        strat = QACompressionStrategy()
+        snap = _make_snapshot(["alpha", "beta", "gamma"])
+        snap.token_budget = 1
+
+        out = await strat.compress(snap)
+
+        assert isinstance(out, ContextOutput)
+        assert out.output_type == OutputType.COMPRESSED
+        assert out.scope_id == snap.scope_id

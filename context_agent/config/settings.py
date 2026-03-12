@@ -16,6 +16,40 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONTEXT_AGENT_CONFIG_PATH = PROJECT_ROOT / "config" / "context_agent.yaml"
 
+_SECTION_FIELD_MAP: dict[tuple[str, ...], str] = {
+    ("service", "name"): "service_name",
+    ("service", "environment"): "environment",
+    ("service", "log_level"): "log_level",
+    ("service", "debug"): "debug",
+    ("http", "host"): "http_host",
+    ("http", "port"): "http_port",
+    ("redis", "url"): "redis_url",
+    ("redis", "pool_max_connections"): "redis_pool_max_connections",
+    ("storage", "s3", "endpoint_url"): "s3_endpoint_url",
+    ("storage", "s3", "bucket"): "s3_bucket",
+    ("storage", "s3", "access_key"): "s3_access_key",
+    ("storage", "s3", "secret_key"): "s3_secret_key",
+    ("llm", "base_url"): "llm_base_url",
+    ("llm", "model"): "llm_model",
+    ("llm", "timeout_s"): "llm_timeout_s",
+    ("llm", "max_retries"): "llm_max_retries",
+    ("integrations", "openjiuwen", "config_path"): "openjiuwen_config_path",
+    ("budgets", "latency", "hot_tier_timeout_ms"): "hot_tier_timeout_ms",
+    ("budgets", "latency", "warm_tier_timeout_ms"): "warm_tier_timeout_ms",
+    ("budgets", "latency", "cold_tier_timeout_ms"): "cold_tier_timeout_ms",
+    ("budgets", "latency", "aggregation_timeout_ms"): "aggregation_timeout_ms",
+    ("budgets", "tokens", "default_token_budget"): "default_token_budget",
+    ("budgets", "tokens", "tool_result_token_limit"): "tool_result_token_limit",
+    ("memory", "queue_maxsize"): "memory_queue_maxsize",
+    ("memory", "worker_count"): "memory_worker_count",
+    ("observability", "otlp_endpoint"): "otlp_endpoint",
+    ("observability", "prometheus_enabled"): "prometheus_enabled",
+    ("observability", "metrics_prefix"): "metrics_prefix",
+    ("auth", "enabled"): "auth_enabled",
+    ("auth", "secret_key"): "auth_secret_key",
+    ("auth", "api_keys"): "api_keys",
+}
+
 
 def resolve_context_agent_config_path(explicit_path: str | None = None) -> Path | None:
     """Resolve the ContextAgent config file path.
@@ -39,6 +73,26 @@ def resolve_context_agent_config_path(explicit_path: str | None = None) -> Path 
     if DEFAULT_CONTEXT_AGENT_CONFIG_PATH.is_file():
         return DEFAULT_CONTEXT_AGENT_CONFIG_PATH.resolve()
     return None
+
+
+def _flatten_context_agent_mapping(data: dict[str, Any]) -> dict[str, Any]:
+    """Flatten segmented context_agent.yaml content into Settings field names."""
+    flattened: dict[str, Any] = {}
+    for path, target_field in _SECTION_FIELD_MAP.items():
+        current: Any = data
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                current = None
+                break
+            current = current[key]
+        if current is not None:
+            flattened[target_field] = current
+
+    for key, value in data.items():
+        if key in Settings.model_fields:
+            flattened.setdefault(key, value)
+
+    return flattened
 
 
 class ContextAgentYamlSettingsSource(PydanticBaseSettingsSource):
@@ -67,15 +121,17 @@ class ContextAgentYamlSettingsSource(PydanticBaseSettingsSource):
         if not isinstance(data, dict):
             raise ValueError(f"ContextAgent config must be a mapping: {config_path}")
 
-        openjiuwen_path = data.get("openjiuwen_config_path")
+        flattened = _flatten_context_agent_mapping(data)
+
+        openjiuwen_path = flattened.get("openjiuwen_config_path")
         if isinstance(openjiuwen_path, str) and openjiuwen_path.strip():
             candidate = Path(openjiuwen_path).expanduser()
             if not candidate.is_absolute():
                 candidate = (config_path.parent / candidate).resolve()
-            data["openjiuwen_config_path"] = str(candidate)
+            flattened["openjiuwen_config_path"] = str(candidate)
 
-        data.setdefault("context_agent_config_path", str(config_path))
-        return data
+        flattened.setdefault("context_agent_config_path", str(config_path))
+        return flattened
 
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         value = self._data.get(field_name)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from context_agent.models.context import ContextOutput, ContextSnapshot
 from context_agent.strategies.base import CompressionStrategy
 from context_agent.utils.logging import get_logger
 
@@ -43,17 +44,17 @@ class LongSessionCompressionStrategy(CompressionStrategy):
 
     async def compress(
         self,
-        messages: list[dict[str, Any]],
-        token_budget: int,
-        scope_id: str = "",
+        snapshot: ContextSnapshot,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> ContextOutput:
+        messages = self.snapshot_to_messages(snapshot)
         if not messages:
-            return []
+            return self.build_output(snapshot, [])
 
-        current_tokens = await self.estimate_tokens(messages)
+        token_budget = snapshot.token_budget
+        current_tokens = self.estimate_tokens(snapshot)
         if current_tokens <= token_budget:
-            return messages
+            return self.build_output(snapshot, messages)
 
         # Try openJiuwen MessageSummaryOffloader
         if self._offloader is not None:
@@ -61,18 +62,20 @@ class LongSessionCompressionStrategy(CompressionStrategy):
                 result = await self._offloader.offload(
                     messages=messages,
                     token_budget=token_budget,
-                    user_id=scope_id,
+                    user_id=snapshot.scope_id,
                 )
                 if result:
-                    return result if isinstance(result, list) else messages
+                    compressed = result if isinstance(result, list) else messages
+                    return self.build_output(snapshot, compressed)
             except Exception as exc:
                 logger.warning("MessageSummaryOffloader failed", error=str(exc))
 
         # LLM-based rolling summary
         if self._llm is not None:
-            return await self._rolling_summary(messages, token_budget, scope_id)
+            compressed = await self._rolling_summary(messages, token_budget, snapshot.scope_id)
+            return self.build_output(snapshot, compressed)
 
-        return self._simple_window(messages, token_budget)
+        return self.build_output(snapshot, self._simple_window(messages, token_budget))
 
     async def _rolling_summary(
         self,
@@ -98,7 +101,7 @@ class LongSessionCompressionStrategy(CompressionStrategy):
 
             # Compress summary + recent into budget
             candidate = system_msgs + [summary_msg] + recent
-            if await self.estimate_tokens(candidate) <= token_budget:
+            if self.estimate_message_tokens(candidate) <= token_budget:
                 return candidate
 
             # Still over budget: summarize again with LLM
@@ -127,5 +130,7 @@ class LongSessionCompressionStrategy(CompressionStrategy):
                 chars_used += msg_len
         return system + kept
 
-    async def estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        return sum(len(m.get("content", "")) for m in messages) // 4
+    def estimate_tokens(self, snapshot: ContextSnapshot) -> int:
+        if snapshot.total_tokens > 0:
+            return snapshot.total_tokens
+        return self.estimate_message_tokens(self.snapshot_to_messages(snapshot))

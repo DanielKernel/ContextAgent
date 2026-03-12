@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from context_agent.models.context import ContextOutput, ContextSnapshot, OutputType
 from context_agent.strategies.base import CompressionStrategy
 from context_agent.utils.logging import get_logger
 
@@ -55,23 +56,28 @@ class CompactionStrategy(CompressionStrategy):
 
     async def compress(
         self,
-        messages: list[dict[str, Any]],
-        token_budget: int,
-        scope_id: str = "",
-        task_description: str = "",
+        snapshot: ContextSnapshot,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> ContextOutput:
+        messages = self.snapshot_to_messages(snapshot)
         if not messages:
-            return []
+            return self.build_output(snapshot, [], output_type=OutputType.STRUCTURED)
 
-        current_tokens = await self.estimate_tokens(messages)
+        token_budget = snapshot.token_budget
+        task_description = snapshot.query
+        current_tokens = self.estimate_tokens(snapshot)
         if current_tokens <= token_budget:
-            return messages
+            return self.build_output(snapshot, messages, output_type=OutputType.STRUCTURED)
 
         if self._llm is not None:
-            return await self._llm_compact(messages, token_budget, task_description)
+            compacted = await self._llm_compact(messages, token_budget, task_description)
+            return self.build_output(snapshot, compacted, output_type=OutputType.STRUCTURED)
 
-        return self._structured_truncate(messages, token_budget)
+        return self.build_output(
+            snapshot,
+            self._structured_truncate(messages, token_budget),
+            output_type=OutputType.STRUCTURED,
+        )
 
     async def _llm_compact(
         self,
@@ -132,5 +138,7 @@ class CompactionStrategy(CompressionStrategy):
                 chars_used += msg_len
         return system + kept
 
-    async def estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        return sum(len(m.get("content", "")) for m in messages) // 4
+    def estimate_tokens(self, snapshot: ContextSnapshot) -> int:
+        if snapshot.total_tokens > 0:
+            return snapshot.total_tokens
+        return self.estimate_message_tokens(self.snapshot_to_messages(snapshot))

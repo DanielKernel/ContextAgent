@@ -12,6 +12,7 @@ from context_agent.orchestration.strategy_scheduler import (
     StrategySelectionContext,
 )
 from context_agent.strategies.base import CompressionStrategy
+from context_agent.strategies.qa_strategy import QACompressionStrategy
 from context_agent.strategies.registry import StrategyRegistry
 
 
@@ -139,3 +140,30 @@ class TestCompressionStrategyRouter:
         output = await router.route_and_compress(snap, _ctx())
         assert output.scope_id == "s1"
         assert output.session_id == "session-abc"
+
+    async def test_qa_strategy_receives_snapshot_token_budget(self):
+        compressor = AsyncMock(
+            return_value=[{"role": "assistant", "content": "compressed answer"}]
+        )
+        StrategyRegistry.instance().register(
+            QACompressionStrategy(dialogue_compressor=type("C", (), {"compress": compressor})())
+        )
+
+        class _FixedScheduler(HybridStrategyScheduler):
+            def schedule(self, ctx):
+                from context_agent.orchestration.strategy_scheduler import StrategySchedule
+
+                return StrategySchedule(strategy_ids=["qa"])
+
+        router = CompressionStrategyRouter(scheduler=_FixedScheduler())
+        snap = _make_snapshot("x" * 800)
+        snap.query = "What changed?"
+        snap.token_budget = 32
+
+        output = await router.route_and_compress(snap, _ctx())
+
+        compressor.assert_awaited_once()
+        assert compressor.await_args.kwargs["token_budget"] == 32
+        assert compressor.await_args.kwargs["query"] == "What changed?"
+        assert output.output_type == OutputType.COMPRESSED
+        assert "compressed answer" in output.content

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from context_agent.models.context import ContextOutput, ContextSnapshot
 from context_agent.strategies.base import CompressionStrategy
 from context_agent.utils.logging import get_logger
 
@@ -35,17 +36,17 @@ class RealtimeCompressionStrategy(CompressionStrategy):
 
     async def compress(
         self,
-        messages: list[dict[str, Any]],
-        token_budget: int,
-        scope_id: str = "",
+        snapshot: ContextSnapshot,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> ContextOutput:
+        messages = self.snapshot_to_messages(snapshot)
         if not messages:
-            return []
+            return self.build_output(snapshot, [])
 
-        current_tokens = await self.estimate_tokens(messages)
+        token_budget = snapshot.token_budget
+        current_tokens = self.estimate_tokens(snapshot)
         if current_tokens <= token_budget:
-            return messages
+            return self.build_output(snapshot, messages)
 
         # Try openJiuwen CurrentRoundCompressor (fast, no LLM)
         if self._compressor is not None:
@@ -55,11 +56,11 @@ class RealtimeCompressionStrategy(CompressionStrategy):
                     token_budget=token_budget,
                 )
                 if result and isinstance(result, list):
-                    return result
+                    return self.build_output(snapshot, result)
             except Exception as exc:
                 logger.warning("CurrentRoundCompressor failed", error=str(exc))
 
-        return self._fast_truncate(messages, token_budget)
+        return self.build_output(snapshot, self._fast_truncate(messages, token_budget))
 
     def _fast_truncate(
         self, messages: list[dict[str, Any]], token_budget: int
@@ -81,5 +82,7 @@ class RealtimeCompressionStrategy(CompressionStrategy):
                 break
         return system + kept
 
-    async def estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        return sum(len(m.get("content", "")) for m in messages) // 4
+    def estimate_tokens(self, snapshot: ContextSnapshot) -> int:
+        if snapshot.total_tokens > 0:
+            return snapshot.total_tokens
+        return self.estimate_message_tokens(self.snapshot_to_messages(snapshot))

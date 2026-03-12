@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from context_agent.models.context import ContextOutput, ContextSnapshot
 from context_agent.strategies.base import CompressionStrategy
 from context_agent.utils.errors import CompressionError
 from context_agent.utils.logging import get_logger
@@ -37,18 +38,18 @@ class QACompressionStrategy(CompressionStrategy):
 
     async def compress(
         self,
-        messages: list[dict[str, Any]],
-        token_budget: int,
-        scope_id: str = "",
-        query: str = "",
+        snapshot: ContextSnapshot,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> ContextOutput:
+        messages = self.snapshot_to_messages(snapshot)
         if not messages:
-            return []
+            return self.build_output(snapshot, [])
 
-        current_tokens = await self.estimate_tokens(messages)
+        token_budget = snapshot.token_budget
+        query = snapshot.query
+        current_tokens = self.estimate_tokens(snapshot)
         if current_tokens <= token_budget:
-            return messages
+            return self.build_output(snapshot, messages)
 
         # Try openJiuwen DialogueCompressor first
         if self._compressor is not None:
@@ -58,16 +59,18 @@ class QACompressionStrategy(CompressionStrategy):
                     token_budget=token_budget,
                     query=query,
                 )
-                return result if isinstance(result, list) else messages
+                compressed = result if isinstance(result, list) else messages
+                return self.build_output(snapshot, compressed)
             except Exception as exc:
                 logger.warning("DialogueCompressor failed, falling back to LLM", error=str(exc))
 
         # LLM fallback
         if self._llm is not None:
-            return await self._llm_compress(messages, token_budget, query)
+            compressed = await self._llm_compress(messages, token_budget, query)
+            return self.build_output(snapshot, compressed)
 
         # Last resort: truncate from oldest messages
-        return self._truncate(messages, token_budget)
+        return self.build_output(snapshot, self._truncate(messages, token_budget))
 
     async def _llm_compress(
         self,
@@ -105,6 +108,7 @@ class QACompressionStrategy(CompressionStrategy):
                 break
         return result
 
-    async def estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        return total_chars // 4  # rough estimate
+    def estimate_tokens(self, snapshot: ContextSnapshot) -> int:
+        if snapshot.total_tokens > 0:
+            return snapshot.total_tokens
+        return self.estimate_message_tokens(self.snapshot_to_messages(snapshot))

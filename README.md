@@ -24,7 +24,7 @@ bash scripts/setup-openclaw.sh
 
 就这两条命令。服务默认监听 `http://localhost:8000`，接入后 OpenClaw 会自动使用 ContextAgent 进行上下文管理。
 
-> ContextAgent 现在默认随代码发布两份标准配置：`config/context_agent.yaml` 和 `config/openjiuwen.yaml`。启动时会先读取 ContextAgent 配置，再按其中的 `openjiuwen_config_path` 自动加载 openJiuwen 配置。
+> ContextAgent 现在默认随代码发布两份标准配置：`config/context_agent.yaml` 和 `config/openjiuwen.yaml`。启动时会先读取 ContextAgent 配置，再按其中的 `integrations.openjiuwen.config_path` 自动加载 openJiuwen 配置。
 
 > ContextAgent **只通过 openJiuwen 配置对接向量数据库**，不会在业务代码中直连向量库。
 

@@ -173,6 +173,7 @@ class ContextAggregator:
                 session_id=request.session_id,
                 items=budgeted,
                 total_tokens=total_tokens,
+                token_budget=request.token_budget,
                 query=request.query,
                 degraded_sources=degraded,
             )

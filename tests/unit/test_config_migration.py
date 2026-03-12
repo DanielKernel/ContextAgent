@@ -34,15 +34,16 @@ def test_merge_missing_values_only_inserts_absent_keys():
 def test_migrate_config_file_preserves_existing_values(tmp_path):
     target = tmp_path / "context_agent.yaml"
     template = tmp_path / "template.yaml"
-    target.write_text("http_port: 9000\n", encoding="utf-8")
-    template.write_text("http_port: 8080\nlog_level: INFO\n", encoding="utf-8")
+    target.write_text("http:\n  port: 9000\n", encoding="utf-8")
+    template.write_text("http:\n  port: 8080\nservice:\n  log_level: INFO\n", encoding="utf-8")
 
     result = migrate_config_file(target, template)
 
     assert result["mode"] == "merged"
-    assert result["inserted_paths"] == ["log_level"]
-    assert "http_port: 9000" in target.read_text(encoding="utf-8")
-    assert "log_level: INFO" in target.read_text(encoding="utf-8")
+    assert result["inserted_paths"] == ["service"]
+    target_text = target.read_text(encoding="utf-8")
+    assert "port: 9000" in target_text
+    assert "log_level: INFO" in target_text
 
 
 def test_migrate_config_file_creates_target_from_template(tmp_path):

@@ -278,6 +278,7 @@ async def compact(req: CompactRequest, request: Request) -> CompactResponse:
         session_id=req.session_id,
         items=items,
         total_tokens=tokens_before,
+        token_budget=req.token_limit,
         query="compact",
     )
 

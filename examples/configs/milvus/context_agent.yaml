@@ -1,41 +1,54 @@
-service_name: context-agent
-environment: development
-log_level: INFO
-debug: false
+service:
+  name: context-agent
+  environment: development
+  log_level: INFO
+  debug: false
 
-http_host: 0.0.0.0
-http_port: 8080
+http:
+  host: 0.0.0.0
+  port: 8080
 
-redis_url: redis://localhost:6379/0
-redis_pool_max_connections: 50
+redis:
+  url: redis://localhost:6379/0
+  pool_max_connections: 50
 
-s3_endpoint_url: ""
-s3_bucket: context-agent-versions
-s3_access_key: ""
-s3_secret_key: ""
+storage:
+  s3:
+    endpoint_url: ""
+    bucket: context-agent-versions
+    access_key: ""
+    secret_key: ""
 
-llm_base_url: http://localhost:11434
-llm_model: qwen2.5:7b
-llm_timeout_s: 30.0
-llm_max_retries: 2
+llm:
+  base_url: http://localhost:11434
+  model: qwen2.5:7b
+  timeout_s: 30.0
+  max_retries: 2
 
-openjiuwen_config_path: openjiuwen.yaml
+integrations:
+  openjiuwen:
+    config_path: openjiuwen.yaml
 
-hot_tier_timeout_ms: 20.0
-warm_tier_timeout_ms: 100.0
-cold_tier_timeout_ms: 300.0
-aggregation_timeout_ms: 200.0
+budgets:
+  latency:
+    hot_tier_timeout_ms: 20.0
+    warm_tier_timeout_ms: 100.0
+    cold_tier_timeout_ms: 300.0
+    aggregation_timeout_ms: 200.0
+  tokens:
+    default_token_budget: 4096
+    tool_result_token_limit: 1024
 
-default_token_budget: 4096
-tool_result_token_limit: 1024
+memory:
+  queue_maxsize: 1000
+  worker_count: 2
 
-memory_queue_maxsize: 1000
-memory_worker_count: 2
+observability:
+  otlp_endpoint: ""
+  prometheus_enabled: true
+  metrics_prefix: context_agent
 
-otlp_endpoint: ""
-prometheus_enabled: true
-metrics_prefix: context_agent
-
-auth_enabled: false
-auth_secret_key: ""
-api_keys: []
+auth:
+  enabled: false
+  secret_key: ""
+  api_keys: []
