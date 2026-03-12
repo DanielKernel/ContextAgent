@@ -6,6 +6,7 @@ import pytest
 
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
+    _instantiate_long_term_memory,
     build_default_api_router,
     load_openjiuwen_config,
 )
@@ -68,3 +69,36 @@ def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path)
     assert router._working_memory is not None
     assert router._memory_orchestrator is not None
     assert router._memory_processor is not None
+
+
+def test_instantiate_long_term_memory_with_config_keyword():
+    class FakeLongTermMemory:
+        def __init__(self, config):
+            self.config = config
+
+    instance = _instantiate_long_term_memory(FakeLongTermMemory, {"user_id": "u1"})
+    assert instance.config == {"user_id": "u1"}
+
+
+def test_instantiate_long_term_memory_with_positional_config():
+    class FakeLongTermMemory:
+        def __init__(self, settings):
+            self.settings = settings
+
+    instance = _instantiate_long_term_memory(FakeLongTermMemory, {"user_id": "u1"})
+    assert instance.settings == {"user_id": "u1"}
+
+
+def test_instantiate_long_term_memory_with_factory_method():
+    class FakeLongTermMemory:
+        def __init__(self):
+            self.config = None
+
+        @classmethod
+        def from_config(cls, config):
+            inst = cls()
+            inst.config = config
+            return inst
+
+    instance = _instantiate_long_term_memory(FakeLongTermMemory, {"user_id": "u1"})
+    assert instance.config == {"user_id": "u1"}

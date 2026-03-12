@@ -114,7 +114,8 @@ settings = get_settings()
 from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from openjiuwen.core.memory.long_term_memory import LongTermMemory  # 需安装 openjiuwen
 
-ltm_instance = LongTermMemory(config=settings)
+# 不同 openJiuwen 版本的构造签名可能不同，请以当前安装版本为准
+ltm_instance = LongTermMemory(settings)
 ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm_instance)
 
 aggregator = ContextAggregator(ltm=ltm_adapter)
@@ -312,11 +313,14 @@ context_text = result["output"]["content"]
 from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from openjiuwen.core.memory.long_term_memory import LongTermMemory
 
-ltm = LongTermMemory(config={
+openjiuwen_cfg = {
     "user_id": "agent-001",
     "llm_config": {...},
     "vector_store": {...},
-})
+}
+
+# 不同 openJiuwen 版本的初始化入口可能是位置参数、config= 或 from_config(...)
+ltm = LongTermMemory(openjiuwen_cfg)
 ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
 ```
 
@@ -338,7 +342,7 @@ ContextAgent **不直接连接**向量数据库、图数据库或外部知识库
 
 ### 5.1.2 openJiuwen 长期记忆配置模板
 
-下面给出一个推荐的 `LongTermMemory(config=...)` 配置结构。实际字段名以你们使用的 openJiuwen 版本为准；如有差异，应在 **openJiuwen 配置层** 做适配，而不是在 ContextAgent 中直连数据库。
+下面给出一个推荐的 `LongTermMemory(...)` 配置结构。实际字段名和初始化签名以你们使用的 openJiuwen 版本为准；如有差异，应在 **openJiuwen 配置层** 做适配，而不是在 ContextAgent 中直连数据库。
 
 ```python
 openjiuwen_ltm_config = {
@@ -683,7 +687,7 @@ from openjiuwen.core.memory.long_term_memory import LongTermMemory
 
 cfg = yaml.safe_load(Path("config/openjiuwen.yaml").read_text())
 
-ltm = LongTermMemory(config=cfg)
+ltm = LongTermMemory(cfg)
 ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
 ```
 
@@ -815,7 +819,7 @@ openjiuwen_cfg = {
     },
 }
 
-openjiuwen_ltm = LongTermMemory(config=openjiuwen_cfg)
+openjiuwen_ltm = LongTermMemory(openjiuwen_cfg)
 openjiuwen_retriever = HybridRetriever(config=openjiuwen_cfg)
 openjiuwen_reranker = StandardReranker(config=openjiuwen_cfg)
 

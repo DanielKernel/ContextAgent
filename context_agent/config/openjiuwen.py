@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,49 @@ from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _instantiate_long_term_memory(long_term_memory_cls: type, config: dict[str, Any]) -> Any:
+    """Instantiate openJiuwen LongTermMemory across constructor variants."""
+    init_fn = long_term_memory_cls.__init__
+    try:
+        init_signature = inspect.signature(init_fn)
+    except (TypeError, ValueError):
+        init_signature = None
+
+    parameter_names = (
+        [name for name in init_signature.parameters if name != "self"]
+        if init_signature is not None
+        else []
+    )
+
+    if "config" in parameter_names:
+        return long_term_memory_cls(config=config)
+
+    if "cfg" in parameter_names:
+        return long_term_memory_cls(cfg=config)
+
+    if len(parameter_names) == 1:
+        return long_term_memory_cls(config)
+
+    from_config = getattr(long_term_memory_cls, "from_config", None)
+    if callable(from_config):
+        return from_config(config)
+
+    create = getattr(long_term_memory_cls, "create", None)
+    if callable(create):
+        return create(config)
+
+    build = getattr(long_term_memory_cls, "build", None)
+    if callable(build):
+        return build(config)
+
+    raise ContextAgentError(
+        "Unsupported openJiuwen LongTermMemory constructor signature. "
+        "Please align ContextAgent with the installed openJiuwen version.",
+        code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+        details={"constructor_parameters": parameter_names},
+    )
 
 
 def load_openjiuwen_config(config_path: str | Path) -> dict[str, Any]:
@@ -85,7 +129,16 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
         config_path=str(Path(config_path).expanduser().resolve()),
         vector_backend=vector_backend,
     )
-    return OpenJiuwenLTMAdapter(ltm=LongTermMemory(config=config))
+    try:
+        ltm = _instantiate_long_term_memory(LongTermMemory, config)
+    except TypeError as exc:
+        raise ContextAgentError(
+            "Failed to initialize openJiuwen LongTermMemory with the installed "
+            "constructor signature.",
+            code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+            details={"reason": str(exc)},
+        ) from exc
+    return OpenJiuwenLTMAdapter(ltm=ltm)
 
 
 def build_default_api_router(settings: Settings | None = None) -> ContextAPIRouter:
