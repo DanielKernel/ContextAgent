@@ -36,46 +36,47 @@ def _instantiate_long_term_memory(long_term_memory_cls: type, config: dict[str, 
         else []
     )
 
-    if "config" in parameter_names:
-        return long_term_memory_cls(config=config)
-
-    if "cfg" in parameter_names:
-        return long_term_memory_cls(cfg=config)
-
-    accepts_var_kwargs = (
-        init_signature is not None
-        and any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD
-            for name, parameter in init_signature.parameters.items()
-            if name != "self"
-        )
-    )
+    attempts: list[tuple[str, Any]] = []
     supported_kwargs = {
         key: value for key, value in config.items() if key in parameter_names
     }
-    if supported_kwargs and (accepts_var_kwargs or len(supported_kwargs) == len(config)):
-        return long_term_memory_cls(**supported_kwargs)
 
-    if len(parameter_names) == 1:
-        return long_term_memory_cls(config)
+    if "config" in parameter_names:
+        attempts.append(("LongTermMemory(config=config)", lambda: long_term_memory_cls(config=config)))
 
-    from_config = getattr(long_term_memory_cls, "from_config", None)
-    if callable(from_config):
-        return from_config(config)
+    if "cfg" in parameter_names:
+        attempts.append(("LongTermMemory(cfg=config)", lambda: long_term_memory_cls(cfg=config)))
 
-    create = getattr(long_term_memory_cls, "create", None)
-    if callable(create):
-        return create(config)
+    if supported_kwargs:
+        attempts.append(("LongTermMemory(**config)", lambda: long_term_memory_cls(**supported_kwargs)))
 
-    build = getattr(long_term_memory_cls, "build", None)
-    if callable(build):
-        return build(config)
+    attempts.append(("LongTermMemory(config)", lambda: long_term_memory_cls(config)))
+
+    for factory_name in ("from_config", "create", "build"):
+        factory = getattr(long_term_memory_cls, factory_name, None)
+        if callable(factory):
+            attempts.append((f"LongTermMemory.{factory_name}(config)", lambda factory=factory: factory(config)))
+            if supported_kwargs:
+                attempts.append(
+                    (f"LongTermMemory.{factory_name}(**config)", lambda factory=factory: factory(**supported_kwargs))
+                )
+
+    errors: list[str] = []
+    for label, attempt in attempts:
+        try:
+            return attempt()
+        except TypeError as exc:
+            errors.append(f"{label}: {exc}")
+            continue
 
     raise ContextAgentError(
         "Unsupported openJiuwen LongTermMemory constructor signature. "
         "Please align ContextAgent with the installed openJiuwen version.",
         code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
-        details={"constructor_parameters": parameter_names},
+        details={
+            "constructor_parameters": parameter_names,
+            "attempts": errors,
+        },
     )
 
 

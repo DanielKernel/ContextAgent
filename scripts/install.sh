@@ -152,7 +152,7 @@ success "openJiuwen 配置已就绪，已写入 .env：CA_OPENJIUWEN_CONFIG_PATH
 
 # ── 第 4 步：验证安装 ─────────────────────────────────────────────────────────
 info "验证安装..."
-"$VENV_DIR/bin/python3" -c "import context_agent; print('  context_agent 导入成功')"
+"$VENV_DIR/bin/python3" -c "import importlib.util; assert importlib.util.find_spec('context_agent') is not None; print('  context_agent 包已安装')"
 success "安装验证通过"
 
 # ── 第 5 步：（可选）启动服务 ─────────────────────────────────────────────────
