@@ -106,6 +106,10 @@ class ContextAPIRouter:
                 category_filter=category_filter,
             )
             snapshot = await self._aggregator.aggregate(agg_request)
+            if snapshot.degraded_sources:
+                warnings.append(
+                    "Degraded sources: " + ", ".join(sorted(snapshot.degraded_sources))
+                )
 
             # 2. Apply exposure policy
             if policy is not None:
@@ -183,6 +187,10 @@ class ContextAPIRouter:
                     )
                 elif output_type == OutputType.STRUCTURED:
                     output = output.model_copy(update={"output_type": OutputType.STRUCTURED})
+                if output.degraded:
+                    warnings.append(
+                        f"Output degraded: {output.error or 'compression fallback applied'}"
+                    )
 
             latency = record_latency(t0)
             logger.info(

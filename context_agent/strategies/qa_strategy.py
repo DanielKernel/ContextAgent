@@ -59,7 +59,7 @@ class QACompressionStrategy(CompressionStrategy):
                     token_budget=token_budget,
                     query=query,
                 )
-                compressed = result if isinstance(result, list) else messages
+                compressed = self.validate_messages(result, strategy_id=self.strategy_id)
                 return self.build_output(snapshot, compressed)
             except Exception as exc:
                 logger.warning("DialogueCompressor failed, falling back to LLM", error=str(exc))
@@ -67,10 +67,20 @@ class QACompressionStrategy(CompressionStrategy):
         # LLM fallback
         if self._llm is not None:
             compressed = await self._llm_compress(messages, token_budget, query)
-            return self.build_output(snapshot, compressed)
+            return self.build_output(
+                snapshot,
+                compressed,
+                degraded=compressed == self._truncate(messages, token_budget),
+                error="qa_fallback_truncate" if compressed == self._truncate(messages, token_budget) else None,
+            )
 
         # Last resort: truncate from oldest messages
-        return self.build_output(snapshot, self._truncate(messages, token_budget))
+        return self.build_output(
+            snapshot,
+            self._truncate(messages, token_budget),
+            degraded=True,
+            error="qa_fallback_truncate",
+        )
 
     async def _llm_compress(
         self,
@@ -85,7 +95,7 @@ class QACompressionStrategy(CompressionStrategy):
                 user_message=user_content,
                 max_tokens=token_budget,
             )
-            return json.loads(result_text)
+            return self.validate_messages(json.loads(result_text), strategy_id=self.strategy_id)
         except Exception as exc:
             logger.warning("LLM compression failed, using truncation", error=str(exc))
             return self._truncate(messages, token_budget)

@@ -141,7 +141,21 @@ class ContextHealthChecker:
             )
         except Exception as exc:
             logger.warning("quick_check failed", scope_id=snapshot.scope_id, error=str(exc))
-            return HealthReport(scope_id=snapshot.scope_id, is_healthy=True)
+            return HealthReport(
+                scope_id=snapshot.scope_id,
+                is_healthy=False,
+                issues=[
+                    HealthIssue(
+                        description=f"quick health check failed: {exc}",
+                        severity="critical",
+                    )
+                ],
+                recommendations=[
+                    "Investigate the health-check failure before trusting this quick-check result"
+                ],
+                total_tokens=snapshot.total_tokens,
+                token_budget=snapshot.token_budget,
+            )
 
     async def check_background(self, snapshot: ContextSnapshot) -> None:
         """Fire-and-forget health check; logs warnings but does not raise."""
@@ -193,7 +207,11 @@ class ContextHealthChecker:
                         details=f"{len(conflicts)} conflicting memory entries detected",
                     )
             except Exception as exc:
-                logger.debug("MemUpdateChecker unavailable", error=str(exc))
+                logger.warning(
+                    "MemUpdateChecker clash check failed",
+                    scope_id=snapshot.scope_id,
+                    error=str(exc),
+                )
 
         # Heuristic: check for items with identical source_type but contradictory sources
         if snapshot.degraded_sources:

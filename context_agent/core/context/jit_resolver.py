@@ -9,12 +9,18 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import redis.asyncio as aioredis
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 
 from context_agent.adapters.retriever_adapter import RetrieverPort
-from context_agent.config.defaults import JIT_RESULT_CACHE_TTL_S
+from context_agent.config.defaults import (
+    JIT_LOCAL_CACHE_MAX_ENTRIES,
+    JIT_RESULT_CACHE_TTL_S,
+)
 from context_agent.models.context import ContextItem
 from context_agent.models.ref import ContextRef, RefType
 from context_agent.utils.errors import ContextAgentError, ErrorCode
@@ -22,6 +28,16 @@ from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _LocalCacheEntry:
+    items: list[ContextItem]
+    created_at: float
+    ttl_s: int
+
+    def is_expired(self, now: float) -> bool:
+        return now - self.created_at >= self.ttl_s
 
 
 class JITResolver:
@@ -46,7 +62,7 @@ class JITResolver:
         self._retriever = retriever
         self._wm = working_memory
         self._redis = redis_client
-        self._local_cache: dict[str, tuple[list[ContextItem], float]] = {}
+        self._local_cache: dict[str, _LocalCacheEntry] = {}
 
     async def resolve(
         self,
@@ -157,15 +173,15 @@ class JITResolver:
             if self._redis is not None:
                 raw = await self._redis.get(full_key)
             else:
-                entry = self._local_cache.get(full_key)
-                raw = json.dumps(entry[0][0].model_dump(mode="json")) if entry else None
+                cached = self._get_local_cache(full_key)
+                return cached[:1] if cached is not None else []
 
             if raw:
                 data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
                 return [ContextItem(**data) if isinstance(data, dict) else ContextItem(
                     source_type="tool_result", tier="hot", content=str(data)
                 )]
-        except Exception as exc:
+        except (RedisError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
             logger.warning("tool result resolution failed", error=str(exc))
         return []
 
@@ -178,8 +194,8 @@ class JITResolver:
             if self._redis is not None:
                 await self._redis.setex(full_key, ttl_s, item.model_dump_json())
             else:
-                self._local_cache[full_key] = ([item], time.monotonic())
-        except Exception as exc:
+                self._set_local_cache(full_key, [item], ttl_s)
+        except (RedisError, TypeError, ValueError) as exc:
             logger.warning("tool result store failed", error=str(exc))
 
     # ── Cache helpers ─────────────────────────────────────────────────────────
@@ -192,11 +208,9 @@ class JITResolver:
                 if raw:
                     return [ContextItem(**d) for d in json.loads(raw)]
             else:
-                entry = self._local_cache.get(cache_key)
-                if entry and time.monotonic() - entry[1] < JIT_RESULT_CACHE_TTL_S:
-                    return entry[0]
-        except Exception:
-            pass
+                return self._get_local_cache(cache_key)
+        except (RedisError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
+            logger.warning("jit cache read failed", ref_id=ref_id, error=str(exc))
         return None
 
     async def _set_cache(self, ref_id: str, items: list[ContextItem]) -> None:
@@ -209,6 +223,46 @@ class JITResolver:
                     json.dumps([i.model_dump(mode="json") for i in items]),
                 )
             else:
-                self._local_cache[cache_key] = (items, time.monotonic())
-        except Exception:
-            pass
+                self._set_local_cache(cache_key, items, JIT_RESULT_CACHE_TTL_S)
+        except (RedisError, TypeError, ValueError) as exc:
+            logger.warning("jit cache write failed", ref_id=ref_id, error=str(exc))
+
+    def _get_local_cache(self, cache_key: str) -> list[ContextItem] | None:
+        now = time.monotonic()
+        self._prune_local_cache(now)
+        entry = self._local_cache.get(cache_key)
+        if entry is None:
+            return None
+        if entry.is_expired(now):
+            self._local_cache.pop(cache_key, None)
+            return None
+        return entry.items
+
+    def _set_local_cache(self, cache_key: str, items: list[ContextItem], ttl_s: int) -> None:
+        now = time.monotonic()
+        self._prune_local_cache(now)
+        self._local_cache[cache_key] = _LocalCacheEntry(
+            items=items,
+            created_at=now,
+            ttl_s=ttl_s,
+        )
+        self._prune_local_cache(now)
+
+    def _prune_local_cache(self, now: float | None = None) -> None:
+        current_time = time.monotonic() if now is None else now
+        expired_keys = [
+            key for key, entry in self._local_cache.items() if entry.is_expired(current_time)
+        ]
+        for key in expired_keys:
+            self._local_cache.pop(key, None)
+
+        overflow = len(self._local_cache) - JIT_LOCAL_CACHE_MAX_ENTRIES
+        if overflow <= 0:
+            return
+
+        oldest_keys = sorted(
+            self._local_cache,
+            key=lambda key: self._local_cache[key].created_at,
+        )[:overflow]
+        for key in oldest_keys:
+            self._local_cache.pop(key, None)

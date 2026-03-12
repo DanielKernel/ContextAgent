@@ -145,6 +145,7 @@ class OpenJiuwenRetrieverAdapter(RetrieverPort):
             )
             return self._to_context_items(results, tier="cold")
         except Exception as exc:
+            logger.warning("agentic_search failed", scope_id=scope_id, locator=locator, error=str(exc))
             raise AdapterError("AgenticRetriever", str(exc), code=ErrorCode.RETRIEVAL_FAILED) from exc
 
     async def graph_search(
@@ -163,6 +164,7 @@ class OpenJiuwenRetrieverAdapter(RetrieverPort):
             )
             return self._to_context_items(results, tier="cold")
         except Exception as exc:
+            logger.warning("graph_search failed", scope_id=scope_id, query=query, error=str(exc))
             raise AdapterError("GraphRetriever", str(exc), code=ErrorCode.GRAPH_DB_UNAVAILABLE) from exc
 
     async def rerank(
@@ -193,5 +195,6 @@ class OpenJiuwenRetrieverAdapter(RetrieverPort):
         try:
             await self._hybrid.retrieve(query="health", user_id="__health__", top_k=1)
             return True
-        except Exception:
+        except Exception as exc:
+            logger.debug("retriever health check failed", error=str(exc))
             return False

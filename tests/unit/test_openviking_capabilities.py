@@ -73,11 +73,19 @@ class TestComputeHotness:
         h = compute_hotness(5, None)
         assert 0.0 <= h <= 1.0
 
+    def test_none_active_count_clamps_to_zero(self):
+        h = compute_hotness(None, datetime.now(tz=timezone.utc))
+        assert 0.0 <= h <= 1.0
+
     def test_tz_naive_updated_at_handled(self):
         """tz-naive updated_at should be treated as UTC without raising."""
         naive_old = datetime.utcnow() - timedelta(days=3)
         h = compute_hotness(5, naive_old)
         assert 0.0 <= h <= 1.0
+
+    def test_non_positive_half_life_rejected(self):
+        with pytest.raises(ValueError, match="half_life_days"):
+            compute_hotness(5, datetime.now(tz=timezone.utc), half_life_days=0)
 
 
 class TestHotnessBlend:

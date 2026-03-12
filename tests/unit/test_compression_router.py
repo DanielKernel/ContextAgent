@@ -95,6 +95,8 @@ class TestCompressionStrategyRouter:
         output = await router.route_and_compress(snap, _ctx("unknown_type"))
         # Should return raw output without raising
         assert output.output_type == OutputType.RAW
+        assert output.degraded is True
+        assert output.error == "compression_fallback_raw"
         assert "fallback content" in output.content
 
     async def test_fallback_when_strategy_fails(self):
@@ -110,6 +112,8 @@ class TestCompressionStrategyRouter:
         # Should not raise; should fall back to raw
         output = await router.route_and_compress(snap, _ctx())
         assert output.output_type == OutputType.RAW
+        assert output.degraded is True
+        assert "intentional failure" in (output.error or "")
 
     async def test_tries_next_strategy_on_failure(self):
         """If first strategy fails, second should succeed."""

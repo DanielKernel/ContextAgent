@@ -85,7 +85,28 @@ class HttpLLMAdapter(LLMPort):
                 resp = await self._client.post("/v1/chat/completions", json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                choices = data.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    raise AdapterError(
+                        "LLM",
+                        "response payload missing non-empty 'choices' list",
+                        code=ErrorCode.ADAPTER_MAPPING_ERROR,
+                    )
+                first_choice = choices[0]
+                if not isinstance(first_choice, dict):
+                    raise AdapterError(
+                        "LLM",
+                        "response payload contains invalid choice entry",
+                        code=ErrorCode.ADAPTER_MAPPING_ERROR,
+                    )
+                message = first_choice.get("message")
+                if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                    raise AdapterError(
+                        "LLM",
+                        "response payload missing message content",
+                        code=ErrorCode.ADAPTER_MAPPING_ERROR,
+                    )
+                return message["content"]
             except httpx.HTTPStatusError as exc:
                 logger.warning(
                     "LLM HTTP error",
@@ -98,18 +119,23 @@ class HttpLLMAdapter(LLMPort):
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 logger.warning("LLM connection error", attempt=attempt, error=str(exc))
                 last_exc = exc
+            except AdapterError as exc:
+                logger.warning("LLM response mapping failed", attempt=attempt, error=str(exc))
+                raise
         raise AdapterError("LLM", str(last_exc), code=ErrorCode.LLM_SERVICE_ERROR) from last_exc
 
     async def health_check(self) -> bool:
         try:
             resp = await self._client.get("/health")
             return resp.status_code == 200
-        except Exception:
+        except Exception as exc:
+            logger.debug("LLM health endpoint failed", error=str(exc))
             try:
                 # Fallback: try a minimal completion
                 await self.complete("ping", "ping", max_tokens=1)
                 return True
-            except Exception:
+            except Exception as fallback_exc:
+                logger.debug("LLM completion fallback health check failed", error=str(fallback_exc))
                 return False
 
     async def close(self) -> None:

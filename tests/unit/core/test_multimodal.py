@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
+import context_agent.core.multimodal.processor as multimodal_module
 from context_agent.core.multimodal.processor import (
     ModalityType,
     MultimodalInput,
@@ -102,3 +105,14 @@ class TestMultimodalProcessor:
         item = await processor.process(inp)
         assert item.metadata["priority"] == "high"
         assert item.metadata["turn"] == 3
+
+    async def test_process_batch_logs_warning_when_text_processing_fails(self):
+        processor = MultimodalProcessor()
+        inp = MultimodalInput(modality=ModalityType.TEXT, content="test")
+
+        with patch.object(multimodal_module, "_detect_language", side_effect=RuntimeError("lang boom")):
+            with patch.object(multimodal_module.logger, "warning") as warning:
+                items = await processor.process_batch([inp])
+
+        assert items == []
+        warning.assert_called_once()

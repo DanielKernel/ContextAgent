@@ -23,7 +23,8 @@ try:
     def _detect_language(text: str) -> str:
         try:
             return _langdetect_detect(text)
-        except Exception:
+        except Exception as exc:
+            logger.debug("language detection failed", error=str(exc))
             return "unknown"
 
 except ImportError:

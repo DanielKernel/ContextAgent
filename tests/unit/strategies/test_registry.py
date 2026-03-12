@@ -6,11 +6,15 @@ import pytest
 
 from context_agent.models.context import ContextItem, ContextOutput, ContextSnapshot, OutputType
 from context_agent.strategies.base import CompressionStrategy
+from context_agent.strategies.compaction_strategy import CompactionStrategy
+from context_agent.strategies.long_session_strategy import LongSessionCompressionStrategy
 from context_agent.strategies.qa_strategy import QACompressionStrategy
+from context_agent.strategies.task_strategy import TaskCompressionStrategy
 from context_agent.strategies.registry import (
     StrategyRegistry,
     ensure_default_strategies_registered,
 )
+from context_agent.utils.errors import CompressionError
 from context_agent.utils.errors import StrategyNotFoundError
 
 
@@ -114,3 +118,64 @@ class TestBuiltinStrategies:
         assert isinstance(out, ContextOutput)
         assert out.output_type == OutputType.COMPRESSED
         assert out.scope_id == snap.scope_id
+
+    @pytest.mark.asyncio
+    async def test_qa_strategy_marks_truncation_fallback_as_degraded(self):
+        class _BadLLM:
+            async def complete(self, **kwargs):
+                raise RuntimeError("boom")
+
+        llm = _BadLLM()
+        strat = QACompressionStrategy(llm_adapter=llm)
+        snap = _make_snapshot(["alpha", "beta", "gamma"])
+        snap.token_budget = 1
+
+        out = await strat.compress(snap)
+
+        assert out.degraded is True
+        assert out.error == "qa_fallback_truncate"
+
+    @pytest.mark.asyncio
+    async def test_task_strategy_rejects_invalid_llm_payload(self):
+        class _BadLLM:
+            async def complete(self, **kwargs):
+                return '{"not":"messages"}'
+
+        strat = TaskCompressionStrategy(llm_adapter=_BadLLM())
+        snap = _make_snapshot(["alpha", "beta", "gamma"])
+        snap.token_budget = 1
+
+        out = await strat.compress(snap)
+
+        assert out.degraded is True
+        assert out.error == "task_fallback_keep_recent"
+
+    @pytest.mark.asyncio
+    async def test_long_session_strategy_marks_simple_window_fallback(self):
+        class _BadLLM:
+            async def complete(self, **kwargs):
+                raise RuntimeError("boom")
+
+        strat = LongSessionCompressionStrategy(llm_adapter=_BadLLM())
+        snap = _make_snapshot(["alpha", "beta", "gamma", "delta"])
+        snap.token_budget = 1
+
+        out = await strat.compress(snap)
+
+        assert out.degraded is True
+        assert out.error == "long_session_fallback_simple_window"
+
+    @pytest.mark.asyncio
+    async def test_compaction_strategy_rejects_invalid_compressed_messages(self):
+        class _BadLLM:
+            async def complete(self, **kwargs):
+                return '{"compressed_messages":"bad"}'
+
+        strat = CompactionStrategy(llm_adapter=_BadLLM())
+        snap = _make_snapshot(["alpha", "beta", "gamma"])
+        snap.token_budget = 1
+
+        out = await strat.compress(snap)
+
+        assert out.output_type == OutputType.STRUCTURED
+        assert "[ltm]" in out.content or out.content == ""

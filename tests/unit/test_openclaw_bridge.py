@@ -302,6 +302,7 @@ class TestCompactEndpoint:
         data = resp.json()
         # Truncated result must fit within token budget
         assert data["tokens_after"] <= 128 + 10  # allow small overhead
+        assert data["status"] == "degraded"
 
     def test_compact_with_legacy_params(self):
         client = _make_client(with_router=True)
@@ -316,6 +317,34 @@ class TestCompactEndpoint:
             },
         )
         assert resp.status_code == 200
+
+    def test_compact_marks_degraded_when_compression_output_is_degraded(self):
+        router = _make_mock_router()
+        router._compression.route_and_compress = AsyncMock(
+            return_value=ContextOutput(
+                scope_id="test",
+                session_id="s1",
+                output_type=OutputType.COMPRESSED,
+                content="[fallback compacted summary]",
+                token_count=10,
+                degraded=True,
+                error="compression_fallback_raw",
+            )
+        )
+        client = TestClient(create_app(api_router=router), raise_server_exceptions=False)
+
+        resp = client.post(
+            "/v1/openclaw/compact",
+            json={
+                "scope_id": "s1",
+                "session_id": "sid1",
+                "messages": _make_messages(5),
+                "token_limit": 1024,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "degraded"
 
 
 # ── after-turn endpoint ────────────────────────────────────────────────────────

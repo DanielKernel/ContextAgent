@@ -83,6 +83,30 @@ class TestContextAggregator:
         # Should not raise
         snapshot = await aggregator.aggregate(req)
         assert snapshot.items == []
+        assert snapshot.degraded_sources == ["ltm"]
+
+    async def test_timeout_marks_sources_as_degraded(self):
+        async def _slow_items(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return _make_items(1)
+
+        ltm = AsyncMock()
+        ltm.search = AsyncMock(side_effect=_slow_items)
+        wm = AsyncMock()
+        wm.to_context_items = AsyncMock(side_effect=_slow_items)
+
+        aggregator = ContextAggregator(ltm=ltm, working_memory=wm)
+        req = AggregationRequest(
+            scope_id="s1",
+            session_id="sess1",
+            query="q",
+            timeout_ms=1.0,
+        )
+
+        snapshot = await aggregator.aggregate(req)
+
+        assert snapshot.items == []
+        assert set(snapshot.degraded_sources) == {"ltm", "working_memory"}
 
     async def test_no_sources_returns_empty_snapshot(self):
         aggregator = ContextAggregator()

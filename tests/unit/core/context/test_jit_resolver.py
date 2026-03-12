@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+import context_agent.core.context.jit_resolver as jit_resolver_module
 from context_agent.core.context.jit_resolver import JITResolver
 from context_agent.models.context import ContextItem
 from context_agent.models.ref import ContextRef, RefType
@@ -119,3 +121,43 @@ class TestJITResolver:
         ref = _make_ref(RefType.FILE, "/docs/architecture.md")
         await resolver.resolve(ref)
         retriever.agentic_search.assert_awaited()
+
+    async def test_local_tool_result_cache_expires(self, monkeypatch):
+        retriever = _mock_retriever(items=[])
+        resolver = JITResolver(retriever=retriever)
+        clock = {"now": 1000.0}
+        monkeypatch.setattr(jit_resolver_module.time, "monotonic", lambda: clock["now"])
+
+        await resolver.store_tool_result(
+            "scope1",
+            "calc:ttl",
+            ContextItem(source_type="tool_result", content="expiring"),
+            ttl_s=1,
+        )
+
+        clock["now"] = 1000.5
+        fresh = await resolver.resolve(_make_ref(RefType.TOOL_RESULT, "calc:ttl"))
+        assert len(fresh) == 1
+
+        clock["now"] = 1001.5
+        expired = await resolver.resolve(_make_ref(RefType.TOOL_RESULT, "calc:ttl"))
+        assert expired == []
+
+    async def test_local_cache_prunes_to_max_entries(self, monkeypatch):
+        retriever = _mock_retriever(items=[])
+        resolver = JITResolver(retriever=retriever)
+        monkeypatch.setattr(jit_resolver_module, "JIT_LOCAL_CACHE_MAX_ENTRIES", 2)
+        clock = {"now": 2000.0}
+        monkeypatch.setattr(jit_resolver_module.time, "monotonic", lambda: clock["now"])
+
+        for index in range(3):
+            await resolver.store_tool_result(
+                "scope1",
+                f"calc:{index}",
+                ContextItem(source_type="tool_result", content=f"value-{index}"),
+                ttl_s=60,
+            )
+            clock["now"] += 1
+
+        assert len(resolver._local_cache) == 2
+        assert "ca:tool:scope1:calc:0" not in resolver._local_cache

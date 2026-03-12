@@ -17,6 +17,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from context_agent.adapters.ltm_adapter import LongTermMemoryPort
+from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -104,6 +105,11 @@ class AsyncMemoryProcessor:
             self._queue.put_nowait(task)
         except asyncio.QueueFull:
             logger.warning("memory queue full, dropping task", scope_id=task.scope_id)
+            raise ContextAgentError(
+                "Async memory queue is full",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"scope_id": task.scope_id, "task_type": task.task_type.value},
+            )
 
     def subscribe(self, handler: Any) -> None:
         """Register a coroutine function to receive MEMORY_UPDATED events."""
@@ -144,7 +150,12 @@ class AsyncMemoryProcessor:
                         if check_result and hasattr(check_result, "messages"):
                             task.messages = check_result.messages
                     except Exception as exc:
-                        logger.warning("MemUpdateChecker failed, skipping", error=str(exc))
+                        logger.warning(
+                            "MemUpdateChecker failed, skipping",
+                            scope_id=task.scope_id,
+                            task_type=task.task_type,
+                            error=str(exc),
+                        )
 
                 await self._ltm.add_messages(
                     scope_id=task.scope_id,
@@ -168,7 +179,12 @@ class AsyncMemoryProcessor:
                     )
                     await self._tiered_router.warm_cache(task.scope_id, items)
                 except Exception as exc:
-                    logger.warning("hot tier warm after write failed", error=str(exc))
+                    logger.warning(
+                        "hot tier warm after write failed",
+                        scope_id=task.scope_id,
+                        task_type=task.task_type,
+                        error=str(exc),
+                    )
 
         finally:
             event = MemoryUpdatedEvent(task.scope_id, task.task_type, success)
@@ -182,4 +198,9 @@ class AsyncMemoryProcessor:
                 else:
                     handler(event)
             except Exception as exc:
-                logger.warning("memory event subscriber failed", error=str(exc))
+                logger.warning(
+                    "memory event subscriber failed",
+                    scope_id=event.scope_id,
+                    task_type=event.task_type,
+                    error=str(exc),
+                )

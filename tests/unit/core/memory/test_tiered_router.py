@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -109,3 +110,46 @@ class TestTieredMemoryRouter:
 
         assert items[0].active_count == 1
 
+    async def test_invalid_redis_hot_cache_payload_falls_back_to_warm(self):
+        warm_item = _item("warm fallback", MemoryType.VARIABLE)
+        ltm = AsyncMock()
+        ltm.search = AsyncMock(return_value=[warm_item])
+        redis_client = AsyncMock()
+        redis_client.get = AsyncMock(return_value=json.dumps({"invalid": "payload"}))
+
+        router = TieredMemoryRouter(ltm=ltm, redis_client=redis_client)
+
+        items, _ = await router.search(
+            "scope-1",
+            "recent state",
+            top_k=1,
+            memory_types=[MemoryType.VARIABLE],
+        )
+
+        assert [item.content for item in items] == ["warm fallback"]
+        ltm.search.assert_awaited_once()
+
+    async def test_hot_cache_rejects_non_variable_memory_types(self):
+        warm_item = _item("warm variable fallback", MemoryType.VARIABLE)
+        ltm = AsyncMock()
+        ltm.search = AsyncMock(return_value=[warm_item])
+        redis_client = AsyncMock()
+        redis_client.get = AsyncMock(
+            return_value=json.dumps(
+                [
+                    _item("semantic item", MemoryType.SEMANTIC).model_dump(mode="json"),
+                ]
+            )
+        )
+
+        router = TieredMemoryRouter(ltm=ltm, redis_client=redis_client)
+
+        items, _ = await router.search(
+            "scope-1",
+            "recent state",
+            top_k=1,
+            memory_types=[MemoryType.VARIABLE],
+        )
+
+        assert [item.content for item in items] == ["warm variable fallback"]
+        ltm.search.assert_awaited_once()

@@ -80,6 +80,7 @@ class CompressionStrategyRouter:
                 logger.warning(
                     "compression failed, trying next strategy",
                     strategy=strategy_id,
+                    scope_id=snapshot.scope_id,
                     error=str(exc),
                 )
                 last_error = exc
@@ -90,10 +91,14 @@ class CompressionStrategyRouter:
             scope_id=snapshot.scope_id,
             error=str(last_error),
         )
-        return self._raw_fallback(snapshot)
+        return self._raw_fallback(snapshot, last_error, schedule.strategy_ids)
 
     @staticmethod
-    def _raw_fallback(snapshot: ContextSnapshot) -> ContextOutput:
+    def _raw_fallback(
+        snapshot: ContextSnapshot,
+        error: Exception | None = None,
+        attempted_strategies: list[str] | None = None,
+    ) -> ContextOutput:
         text = "\n\n".join(item.content for item in snapshot.items)
         return ContextOutput(
             scope_id=snapshot.scope_id,
@@ -101,4 +106,7 @@ class CompressionStrategyRouter:
             output_type=OutputType.RAW,
             content=text,
             token_count=len(text) // 4,
+            degraded=True,
+            error=str(error) if error is not None else "compression_fallback_raw",
+            metadata={"attempted_strategies": attempted_strategies or []},
         )

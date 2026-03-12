@@ -68,9 +68,24 @@ class OpenJiuwenContextEngineAdapter(ContextEnginePort):
             if isinstance(ctx, list):
                 return ctx
             # Some versions return a dict with a "messages" key
-            return ctx.get("messages", []) if isinstance(ctx, dict) else []
+            if isinstance(ctx, dict):
+                messages = ctx.get("messages", [])
+                if isinstance(messages, list):
+                    return messages
+                raise AdapterError(
+                    "ContextEngine",
+                    "get_context returned a dict with non-list 'messages'",
+                    code=ErrorCode.ADAPTER_MAPPING_ERROR,
+                )
+            raise AdapterError(
+                "ContextEngine",
+                f"get_context returned unsupported type: {type(ctx).__name__}",
+                code=ErrorCode.ADAPTER_MAPPING_ERROR,
+            )
         except Exception as exc:
             logger.warning("context_engine.get_context failed", scope_id=scope_id, error=str(exc))
+            if isinstance(exc, AdapterError):
+                raise
             raise AdapterError("ContextEngine", str(exc), code=ErrorCode.OPENJIUWEN_UNAVAILABLE) from exc
 
     async def save_contexts(
@@ -86,7 +101,8 @@ class OpenJiuwenContextEngineAdapter(ContextEnginePort):
                 messages=messages,
             )
         except Exception as exc:
-            raise AdapterError("ContextEngine", str(exc)) from exc
+            logger.warning("context_engine.save_contexts failed", scope_id=scope_id, error=str(exc))
+            raise AdapterError("ContextEngine", str(exc), code=ErrorCode.OPENJIUWEN_UNAVAILABLE) from exc
 
     async def add_messages(
         self,
@@ -101,17 +117,20 @@ class OpenJiuwenContextEngineAdapter(ContextEnginePort):
                 messages=messages,
             )
         except Exception as exc:
-            raise AdapterError("ContextEngine", str(exc)) from exc
+            logger.warning("context_engine.add_messages failed", scope_id=scope_id, error=str(exc))
+            raise AdapterError("ContextEngine", str(exc), code=ErrorCode.OPENJIUWEN_UNAVAILABLE) from exc
 
     async def clear_context(self, scope_id: str, session_id: str) -> None:
         try:
             await self._ce.clear_context(user_id=scope_id, session_id=session_id)
         except Exception as exc:
-            raise AdapterError("ContextEngine", str(exc)) from exc
+            logger.warning("context_engine.clear_context failed", scope_id=scope_id, error=str(exc))
+            raise AdapterError("ContextEngine", str(exc), code=ErrorCode.OPENJIUWEN_UNAVAILABLE) from exc
 
     async def health_check(self) -> bool:
         try:
             await self._ce.get_context(user_id="__health__", session_id="__health__")
             return True
-        except Exception:
+        except Exception as exc:
+            logger.debug("context engine health check failed", error=str(exc))
             return False

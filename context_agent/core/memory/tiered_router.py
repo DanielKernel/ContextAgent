@@ -12,6 +12,8 @@ import time
 from typing import Any
 
 import redis.asyncio as aioredis
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 
 from context_agent.adapters.external_memory_adapter import ExternalMemoryPort
 from context_agent.adapters.ltm_adapter import LongTermMemoryPort
@@ -29,6 +31,89 @@ logger = get_logger(__name__)
 
 # Only VARIABLE type memory is cached in the hot tier (ADR-004)
 _HOT_TIER_MEMORY_TYPES = {MemoryType.VARIABLE}
+
+
+def _validate_hot_cache_payload(
+    payload: Any,
+    *,
+    scope_id: str,
+    cache_source: str,
+) -> list[dict[str, Any]] | None:
+    if not isinstance(payload, list):
+        logger.warning(
+            "hot tier cache payload invalid",
+            scope_id=scope_id,
+            cache_source=cache_source,
+            payload_type=type(payload).__name__,
+        )
+        return None
+
+    validated: list[dict[str, Any]] = []
+    for index, entry in enumerate(payload):
+        if not isinstance(entry, dict):
+            logger.warning(
+                "hot tier cache entry invalid",
+                scope_id=scope_id,
+                cache_source=cache_source,
+                entry_index=index,
+                entry_type=type(entry).__name__,
+            )
+            return None
+        try:
+            item = ContextItem(**entry)
+        except ValidationError as exc:
+            logger.warning(
+                "hot tier cache entry failed validation",
+                scope_id=scope_id,
+                cache_source=cache_source,
+                entry_index=index,
+                error=str(exc),
+            )
+            return None
+        if item.memory_type not in _HOT_TIER_MEMORY_TYPES:
+            logger.warning(
+                "hot tier cache entry rejected",
+                scope_id=scope_id,
+                cache_source=cache_source,
+                entry_index=index,
+                memory_type=str(item.memory_type),
+            )
+            return None
+        validated.append(entry)
+    return validated
+
+
+def _validate_local_hot_items(
+    items: Any,
+    *,
+    scope_id: str,
+) -> list[ContextItem] | None:
+    if not isinstance(items, list):
+        logger.warning(
+            "hot tier local cache payload invalid",
+            scope_id=scope_id,
+            payload_type=type(items).__name__,
+        )
+        return None
+
+    for index, item in enumerate(items):
+        if not isinstance(item, ContextItem):
+            logger.warning(
+                "hot tier local cache entry invalid",
+                scope_id=scope_id,
+                entry_index=index,
+                entry_type=type(item).__name__,
+            )
+            return None
+        if item.memory_type not in _HOT_TIER_MEMORY_TYPES:
+            logger.warning(
+                "hot tier local cache entry rejected",
+                scope_id=scope_id,
+                entry_index=index,
+                memory_type=str(item.memory_type),
+            )
+            return None
+    return items
 
 
 class TieredMemoryRouter:
@@ -120,28 +205,33 @@ class TieredMemoryRouter:
         try:
             timeout = self._settings.hot_tier_timeout_ms / 1000
             if self._redis is not None:
-                raw = await asyncio.wait_for(
-                    self._redis.get(cache_key), timeout=timeout
-                )
+                raw = await asyncio.wait_for(self._redis.get(cache_key), timeout=timeout)
                 if raw:
-                    import json
-
                     data = json.loads(raw)
-                    return [ContextItem(**d) for d in data[:top_k]]
+                    validated = _validate_hot_cache_payload(
+                        data,
+                        scope_id=scope_id,
+                        cache_source="redis",
+                    )
+                    if validated is not None:
+                        return [ContextItem(**entry) for entry in validated[:top_k]]
             else:
                 entry = self._local_cache.get(cache_key)
                 if entry and time.monotonic() - entry[1] < HOT_TIER_TTL_S:
-                    return entry[0][:top_k]
-        except (asyncio.TimeoutError, Exception) as exc:
+                    validated = _validate_local_hot_items(entry[0], scope_id=scope_id)
+                    if validated is not None:
+                        return validated[:top_k]
+                    self._local_cache.pop(cache_key, None)
+        except asyncio.TimeoutError as exc:
             logger.debug("hot tier miss/error", scope_id=scope_id, error=str(exc))
+        except (RedisError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
+            logger.warning("hot tier cache read failed", scope_id=scope_id, error=str(exc))
         return []
 
     async def warm_cache(
         self, scope_id: str, items: list[ContextItem], ttl_s: int = HOT_TIER_TTL_S
     ) -> None:
         """Pre-warm hot tier with items (called by AsyncMemoryProcessor after updates)."""
-        import json
-
         cache_key = f"ca:hot:{scope_id}"
         data = [item.model_dump(mode="json") for item in items if item.memory_type in _HOT_TIER_MEMORY_TYPES]
         if not data:
@@ -233,21 +323,32 @@ class TieredMemoryRouter:
                 raw = await self._redis.get(cache_key)
                 if raw:
                     data = json.loads(raw)
+                    validated = _validate_hot_cache_payload(
+                        data,
+                        scope_id=scope_id,
+                        cache_source="redis",
+                    )
+                    if validated is None:
+                        return
                     changed = False
-                    for entry in data:
+                    for entry in validated:
                         if entry.get("item_id") in id_set:
                             entry["active_count"] = entry.get("active_count", 0) + 1
                             changed = True
                     if changed:
-                        await self._redis.setex(cache_key, HOT_TIER_TTL_S, json.dumps(data))
+                        await self._redis.setex(cache_key, HOT_TIER_TTL_S, json.dumps(validated))
             else:
                 # Update in-process cache
                 entry = self._local_cache.get(cache_key)
                 if entry:
                     items, ts = entry
+                    validated = _validate_local_hot_items(items, scope_id=scope_id)
+                    if validated is None:
+                        self._local_cache.pop(cache_key, None)
+                        return
                     for item in items:
                         if item.item_id in id_set:
                             item.active_count += 1
                     self._local_cache[cache_key] = (items, ts)
-        except Exception as exc:
+        except (RedisError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
             logger.warning("record_usage failed", scope_id=scope_id, error=str(exc))

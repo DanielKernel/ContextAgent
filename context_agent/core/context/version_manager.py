@@ -110,6 +110,13 @@ class ContextVersionManager:
             self._local_data.pop(version_id, None)
         except Exception as exc:
             logger.warning("version delete failed", version_id=version_id, error=str(exc))
+            raise ContextAgentError(
+                f"Failed to delete version '{version_id}'",
+                code=ErrorCode.OBJECT_STORE_UNAVAILABLE,
+                details={"version_id": version_id, "cause": str(exc)},
+            ) from exc
+        for records in self._local.values():
+            records[:] = [record for record in records if record.version_id != version_id]
 
     # ── Storage helpers ───────────────────────────────────────────────────────
 
@@ -136,5 +143,16 @@ class ContextVersionManager:
                 body = await resp["Body"].read()
                 return body.decode()
             except Exception as exc:
-                logger.debug("S3 load failed", error=str(exc))
+                if version_id in self._local_data:
+                    logger.warning(
+                        "S3 load failed, using local fallback",
+                        version_id=version_id,
+                        error=str(exc),
+                    )
+                else:
+                    raise ContextAgentError(
+                        f"Failed to load version '{version_id}' from object storage",
+                        code=ErrorCode.OBJECT_STORE_UNAVAILABLE,
+                        details={"version_id": version_id, "cause": str(exc)},
+                    ) from exc
         return self._local_data.get(version_id)

@@ -63,6 +63,11 @@ class WorkingMemoryManager:
                 self._local.setdefault(key, {})[note.note_id] = serialized
         except Exception as exc:
             logger.warning("working memory write failed", error=str(exc))
+            raise ContextAgentError(
+                f"Failed to create note '{note.note_id}'",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"note_id": note.note_id, "cause": str(exc)},
+            ) from exc
         return note
 
     async def get_note(self, scope_id: str, session_id: str, note_id: str) -> WorkingNote:
@@ -77,6 +82,11 @@ class WorkingMemoryManager:
                 return WorkingNote.model_validate_json(raw)
         except Exception as exc:
             logger.warning("working memory read failed", note_id=note_id, error=str(exc))
+            raise ContextAgentError(
+                f"Failed to read note '{note_id}'",
+                code=ErrorCode.MEMORY_READ_FAILED,
+                details={"note_id": note_id, "cause": str(exc)},
+            ) from exc
         raise ContextAgentError(
             f"Note '{note_id}' not found",
             code=ErrorCode.NOTE_NOT_FOUND,
@@ -108,7 +118,11 @@ class WorkingMemoryManager:
             return sorted(notes, key=lambda n: n.created_at)
         except Exception as exc:
             logger.warning("list_notes failed", scope_id=scope_id, error=str(exc))
-            return []
+            raise ContextAgentError(
+                f"Failed to list notes for session '{session_id}'",
+                code=ErrorCode.MEMORY_READ_FAILED,
+                details={"scope_id": scope_id, "session_id": session_id, "cause": str(exc)},
+            ) from exc
 
     async def update_note(
         self,
@@ -130,6 +144,11 @@ class WorkingMemoryManager:
                 self._local.setdefault(key, {})[note.note_id] = note.model_dump_json()
         except Exception as exc:
             logger.warning("note update failed", note_id=note_id, error=str(exc))
+            raise ContextAgentError(
+                f"Failed to update note '{note_id}'",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"note_id": note_id, "cause": str(exc)},
+            ) from exc
         return note
 
     async def delete_note(self, scope_id: str, session_id: str, note_id: str) -> None:
@@ -142,6 +161,11 @@ class WorkingMemoryManager:
                 self._local.get(key, {}).pop(note_id, None)
         except Exception as exc:
             logger.warning("note delete failed", note_id=note_id, error=str(exc))
+            raise ContextAgentError(
+                f"Failed to delete note '{note_id}'",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"note_id": note_id, "cause": str(exc)},
+            ) from exc
 
     async def clear_session(self, scope_id: str, session_id: str) -> None:
         """Remove all notes for a session (called on session end)."""
@@ -156,6 +180,11 @@ class WorkingMemoryManager:
                 self._local_items.pop(items_key, None)
         except Exception as exc:
             logger.warning("clear_session failed", scope_id=scope_id, error=str(exc))
+            raise ContextAgentError(
+                f"Failed to clear session '{session_id}'",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"scope_id": scope_id, "session_id": session_id, "cause": str(exc)},
+            ) from exc
 
     async def write(self, scope_id: str, session_id: str, item: ContextItem) -> ContextItem:
         """Persist a working-memory ContextItem for the current session."""
@@ -168,6 +197,11 @@ class WorkingMemoryManager:
                 self._local_items.setdefault(key, {})[item.item_id] = serialized
         except Exception as exc:
             logger.warning("working memory item write failed", error=str(exc), item_id=item.item_id)
+            raise ContextAgentError(
+                f"Failed to write working-memory item '{item.item_id}'",
+                code=ErrorCode.MEMORY_WRITE_FAILED,
+                details={"item_id": item.item_id, "cause": str(exc)},
+            ) from exc
         return item
 
     async def list_items(self, scope_id: str, session_id: str) -> list[ContextItem]:
@@ -184,7 +218,11 @@ class WorkingMemoryManager:
             ]
         except Exception as exc:
             logger.warning("list_items failed", scope_id=scope_id, error=str(exc))
-            return []
+            raise ContextAgentError(
+                f"Failed to list working-memory items for session '{session_id}'",
+                code=ErrorCode.MEMORY_READ_FAILED,
+                details={"scope_id": scope_id, "session_id": session_id, "cause": str(exc)},
+            ) from exc
 
     async def to_context_items(
         self, scope_id: str, session_id: str

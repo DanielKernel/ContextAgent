@@ -65,7 +65,7 @@ class LongSessionCompressionStrategy(CompressionStrategy):
                     user_id=snapshot.scope_id,
                 )
                 if result:
-                    compressed = result if isinstance(result, list) else messages
+                    compressed = self.validate_messages(result, strategy_id=self.strategy_id)
                     return self.build_output(snapshot, compressed)
             except Exception as exc:
                 logger.warning("MessageSummaryOffloader failed", error=str(exc))
@@ -73,9 +73,23 @@ class LongSessionCompressionStrategy(CompressionStrategy):
         # LLM-based rolling summary
         if self._llm is not None:
             compressed = await self._rolling_summary(messages, token_budget, snapshot.scope_id)
-            return self.build_output(snapshot, compressed)
+            return self.build_output(
+                snapshot,
+                compressed,
+                degraded=compressed == self._simple_window(messages, token_budget),
+                error=(
+                    "long_session_fallback_simple_window"
+                    if compressed == self._simple_window(messages, token_budget)
+                    else None
+                ),
+            )
 
-        return self.build_output(snapshot, self._simple_window(messages, token_budget))
+        return self.build_output(
+            snapshot,
+            self._simple_window(messages, token_budget),
+            degraded=True,
+            error="long_session_fallback_simple_window",
+        )
 
     async def _rolling_summary(
         self,
@@ -110,7 +124,7 @@ class LongSessionCompressionStrategy(CompressionStrategy):
                 user_message=f"Token budget: {token_budget}\n{json.dumps(candidate)}",
                 max_tokens=token_budget,
             )
-            return json.loads(result_text)
+            return self.validate_messages(json.loads(result_text), strategy_id=self.strategy_id)
         except Exception as exc:
             logger.warning("rolling summary failed", error=str(exc))
             return self._simple_window(messages, token_budget)

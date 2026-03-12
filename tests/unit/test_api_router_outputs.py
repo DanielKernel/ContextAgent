@@ -107,3 +107,35 @@ class TestContextAPIRouterOutputs:
         assert output.compressed_text == "background text"
         assert output.content == "background text"
 
+    async def test_warnings_include_degraded_sources_and_output(self):
+        snapshot = _snapshot()
+        snapshot.degraded_sources = ["ltm"]
+        aggregator = AsyncMock()
+        aggregator.aggregate = AsyncMock(return_value=snapshot)
+        compression_router = MagicMock()
+        compression_router.route_and_compress = AsyncMock(
+            return_value=ContextOutput(
+                scope_id="scope-1",
+                session_id="sess-1",
+                output_type=OutputType.COMPRESSED,
+                content="fallback text",
+                token_count=3,
+                degraded=True,
+                error="compression_fallback_raw",
+            )
+        )
+        router = ContextAPIRouter(
+            aggregator=aggregator,
+            compression_router=compression_router,
+        )
+
+        output, warnings = await router.handle(
+            scope_id="scope-1",
+            session_id="sess-1",
+            query="summarize",
+            output_type=OutputType.COMPRESSED,
+        )
+
+        assert output.degraded is True
+        assert any("Degraded sources: ltm" == warning for warning in warnings)
+        assert any("Output degraded: compression_fallback_raw" == warning for warning in warnings)

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from context_agent.core.context.version_manager import ContextVersionManager
 from context_agent.models.context import ContextItem, ContextSnapshot
-from context_agent.utils.errors import ContextAgentError
+from context_agent.utils.errors import ContextAgentError, ErrorCode
 
 
 def _make_snapshot(scope: str = "s1", session: str = "sess1", n_items: int = 3) -> ContextSnapshot:
@@ -88,3 +90,23 @@ class TestContextVersionManager:
 
         records = await vm.list_versions("s1", "sess1", limit=5)
         assert len(records) == 5
+
+    async def test_delete_version_removes_version_from_listing(self):
+        vm = ContextVersionManager()
+        snap = _make_snapshot()
+        record = await vm.create_snapshot(snap)
+
+        await vm.delete_version(record.version_id)
+
+        records = await vm.list_versions("s1", "sess1")
+        assert record.version_id not in [item.version_id for item in records]
+
+    async def test_restore_raises_object_store_error_when_remote_load_fails_without_local_copy(self):
+        s3_client = AsyncMock()
+        s3_client.get_object = AsyncMock(side_effect=RuntimeError("s3 unavailable"))
+        vm = ContextVersionManager(s3_client=s3_client)
+
+        with pytest.raises(ContextAgentError) as exc_info:
+            await vm.restore("s1", "sess1", "missing-remote-version")
+
+        assert exc_info.value.code == ErrorCode.OBJECT_STORE_UNAVAILABLE

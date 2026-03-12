@@ -31,7 +31,7 @@ def _sigmoid(x: float) -> float:
 
 
 def compute_hotness(
-    active_count: int,
+    active_count: int | None,
     updated_at: datetime | None = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
 ) -> float:
@@ -45,6 +45,14 @@ def compute_hotness(
     Returns:
         float in [0, 1]: 0 = cold/never used, approaching 1 = very hot.
     """
+    if active_count is None:
+        active_count = 0
+    elif not isinstance(active_count, int):
+        raise TypeError("active_count must be an int or None")
+
+    if half_life_days <= 0:
+        raise ValueError("half_life_days must be greater than 0")
+
     if active_count < 0:
         active_count = 0
 

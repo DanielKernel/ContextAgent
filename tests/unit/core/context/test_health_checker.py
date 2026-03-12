@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from context_agent.core.context.health_checker import ContextHealthChecker
@@ -58,6 +60,18 @@ class TestContextHealthChecker:
         report = await checker.quick_check(snap)
         assert report is not None
         assert report.scope_id == "scope1"
+
+    async def test_quick_check_failure_is_not_reported_as_healthy(self):
+        snap = _make_snapshot([])
+        checker = ContextHealthChecker()
+        checker._check_distraction = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+        report = await checker.quick_check(snap)
+
+        assert report.is_healthy is False
+        assert report.issues
+        assert report.issues[0].severity == "critical"
+        assert "quick health check failed" in report.issues[0].description
 
     async def test_report_has_recommendations(self):
         items = (

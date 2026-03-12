@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from context_agent.models.context import ContextOutput, ContextSnapshot, OutputType
+from context_agent.utils.errors import CompressionError
 
 
 class CompressionStrategy(ABC):
@@ -76,6 +77,39 @@ class CompressionStrategy(ABC):
             rendered.append(f"[{role}] {content}" if role else content)
         return "\n\n".join(rendered)
 
+    @staticmethod
+    def validate_messages(
+        messages: Any,
+        *,
+        strategy_id: str,
+    ) -> list[dict[str, Any]]:
+        """Validate and normalize strategy-produced messages."""
+        if not isinstance(messages, list):
+            raise CompressionError(
+                f"Strategy '{strategy_id}' returned a non-list message payload",
+                strategy_id=strategy_id,
+            )
+
+        normalized: list[dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                raise CompressionError(
+                    f"Strategy '{strategy_id}' returned a non-dict message at index {index}",
+                    strategy_id=strategy_id,
+                )
+            normalized.append(
+                {
+                    "role": str(message.get("role", "")).strip(),
+                    "content": str(message.get("content", "")),
+                    "metadata": (
+                        dict(message.get("metadata", {}))
+                        if isinstance(message.get("metadata", {}), dict)
+                        else {}
+                    ),
+                }
+            )
+        return normalized
+
     @classmethod
     def build_output(
         cls,
@@ -84,6 +118,8 @@ class CompressionStrategy(ABC):
         *,
         output_type: OutputType = OutputType.COMPRESSED,
         metadata: dict[str, Any] | None = None,
+        degraded: bool = False,
+        error: str | None = None,
     ) -> ContextOutput:
         """Build a ContextOutput from strategy-produced messages."""
         content = cls.render_messages(messages)
@@ -94,5 +130,7 @@ class CompressionStrategy(ABC):
             user_id=snapshot.user_id,
             content=content,
             token_count=max(len(content) // 4, 0),
+            degraded=degraded,
+            error=error,
             metadata=metadata or {},
         )

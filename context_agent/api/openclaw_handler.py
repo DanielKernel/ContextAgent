@@ -268,6 +268,8 @@ async def compact(req: CompactRequest, request: Request) -> CompactResponse:
             messages=truncated,
             tokens_before=_estimate_tokens(req.messages),
             tokens_after=_estimate_tokens(truncated),
+            status="degraded",
+            summary="Compaction unavailable; used truncation fallback.",
         )
 
     tokens_before = _estimate_tokens(req.messages)
@@ -299,11 +301,13 @@ async def compact(req: CompactRequest, request: Request) -> CompactResponse:
         ]
         tokens_after = _estimate_tokens(compacted_messages)
         summary = output.content[:200] if output.content else None
+        status = "degraded" if output.degraded else "ok"
     except Exception as exc:
         logger.warning("openclaw.compact error, falling back to truncation", error=str(exc))
         compacted_messages = _truncate_to_budget(req.messages, req.token_limit)
         tokens_after = _estimate_tokens(compacted_messages)
-        summary = None
+        summary = "Compaction failed; used truncation fallback."
+        status = "degraded"
 
     logger.info(
         "openclaw.compact completed",
@@ -315,6 +319,7 @@ async def compact(req: CompactRequest, request: Request) -> CompactResponse:
         messages=compacted_messages,
         tokens_before=tokens_before,
         tokens_after=tokens_after,
+        status=status,
         summary=summary,
     )
 

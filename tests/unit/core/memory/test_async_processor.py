@@ -13,6 +13,7 @@ from context_agent.core.memory.async_processor import (
     MemoryTaskType,
 )
 from context_agent.models.context import ContextItem, MemoryType
+from context_agent.utils.errors import ContextAgentError, ErrorCode
 
 
 def _variable_item() -> ContextItem:
@@ -116,3 +117,17 @@ class TestAsyncMemoryProcessor:
         ltm.update_by_id.assert_awaited_once_with("scope-1", "mem-1", {"content": "new value"})
         ltm.delete_by_id.assert_awaited_once_with("scope-1", "mem-2")
 
+    async def test_enqueue_raises_when_queue_is_full(self):
+        ltm = AsyncMock()
+        processor = AsyncMemoryProcessor(ltm=ltm, queue_maxsize=1, worker_count=1)
+
+        await processor.enqueue(
+            MemoryTask(scope_id="scope-1", task_type=MemoryTaskType.ADD)
+        )
+
+        with pytest.raises(ContextAgentError) as exc_info:
+            await processor.enqueue(
+                MemoryTask(scope_id="scope-1", task_type=MemoryTaskType.ADD)
+            )
+
+        assert exc_info.value.code == ErrorCode.MEMORY_WRITE_FAILED

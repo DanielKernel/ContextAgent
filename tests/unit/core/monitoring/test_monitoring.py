@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import types
 import pytest
 from unittest.mock import MagicMock, patch
 
+import context_agent.core.monitoring.collector as collector_module
 from context_agent.core.monitoring.alert_engine import AlertEngine
 from context_agent.core.monitoring.collector import MonitoringCollector
 from context_agent.models.metrics import AlertConfig, MetricRecord
@@ -45,6 +47,35 @@ class TestMonitoringCollector:
         collector = MonitoringCollector()
         record = _make_record()
         collector.emit_sync(record)  # should not raise
+
+    async def test_emit_otel_logs_debug_on_failure(self):
+        record = _make_record()
+        fake_trace = types.SimpleNamespace(
+            get_current_span=lambda: (_ for _ in ()).throw(RuntimeError("otel boom"))
+        )
+        fake_module = types.SimpleNamespace(trace=fake_trace)
+
+        with patch.dict("sys.modules", {"opentelemetry": fake_module}):
+            with patch.object(collector_module.logger, "debug") as debug:
+                MonitoringCollector._emit_otel(record)
+
+        debug.assert_called_once()
+        assert debug.call_args.args[0] == "otel metric emission failed"
+
+    async def test_emit_prometheus_logs_debug_on_failure(self):
+        record = _make_record()
+        histogram = MagicMock()
+        histogram.labels.side_effect = RuntimeError("prom boom")
+        counter = MagicMock()
+
+        with patch.object(collector_module, "_PROMETHEUS_AVAILABLE", True):
+            with patch.object(collector_module, "LATENCY_HISTOGRAM", histogram, create=True):
+                with patch.object(collector_module, "REQUEST_COUNTER", counter, create=True):
+                    with patch.object(collector_module.logger, "debug") as debug:
+                        MonitoringCollector._emit_prometheus(record)
+
+        debug.assert_called_once()
+        assert debug.call_args.args[0] == "prometheus metric emission failed"
 
 
 class TestAlertEngine:

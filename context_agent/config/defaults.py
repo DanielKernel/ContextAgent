@@ -11,6 +11,7 @@ COLD_TIER_TTL_S: int = 86_400    # 24 h – stable semantic knowledge
 
 # ── JIT resolver result cache ────────────────────────────────────────────────
 JIT_RESULT_CACHE_TTL_S: int = 60
+JIT_LOCAL_CACHE_MAX_ENTRIES: int = 512
 
 # ── Token budgets ─────────────────────────────────────────────────────────────
 DEFAULT_TOKEN_BUDGET: int = 4_096

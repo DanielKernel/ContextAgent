@@ -55,12 +55,20 @@ class RealtimeCompressionStrategy(CompressionStrategy):
                     messages=messages,
                     token_budget=token_budget,
                 )
-                if result and isinstance(result, list):
-                    return self.build_output(snapshot, result)
+                if result:
+                    return self.build_output(
+                        snapshot,
+                        self.validate_messages(result, strategy_id=self.strategy_id),
+                    )
             except Exception as exc:
                 logger.warning("CurrentRoundCompressor failed", error=str(exc))
 
-        return self.build_output(snapshot, self._fast_truncate(messages, token_budget))
+        return self.build_output(
+            snapshot,
+            self._fast_truncate(messages, token_budget),
+            degraded=True,
+            error="realtime_fallback_truncate",
+        )
 
     def _fast_truncate(
         self, messages: list[dict[str, Any]], token_budget: int

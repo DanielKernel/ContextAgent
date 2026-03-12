@@ -132,13 +132,24 @@ class ContextAggregator:
                     scope_id=request.scope_id,
                     timeout_ms=request.timeout_ms,
                 )
-                results = []
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                results = [asyncio.TimeoutError() for _ in labels]
 
             all_items: list[ContextItem] = []
             degraded: list[str] = []
             for label, result in zip(labels, results or []):
                 if isinstance(result, Exception):
                     logger.warning("source failed", source=label, error=str(result))
+                    degraded.append(label)
+                elif not isinstance(result, list):
+                    logger.warning(
+                        "source returned invalid payload",
+                        scope_id=request.scope_id,
+                        source=label,
+                        payload_type=type(result).__name__,
+                    )
                     degraded.append(label)
                 else:
                     all_items.extend(result or [])
@@ -190,6 +201,8 @@ class ContextAggregator:
         except Exception as exc:
             logger.warning(
                 "agentic search unavailable, falling back to standard",
+                scope_id=request.scope_id,
+                query=request.query,
                 error=str(exc),
             )
         return await self._ltm.search(request.scope_id, request.query, request.top_k)

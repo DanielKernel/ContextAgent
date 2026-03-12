@@ -76,12 +76,20 @@ class TaskCompressionStrategy(CompressionStrategy):
                     user_message=user_content,
                     max_tokens=token_budget,
                 )
-                return self.build_output(snapshot, json.loads(result_text))
+                return self.build_output(
+                    snapshot,
+                    self.validate_messages(json.loads(result_text), strategy_id=self.strategy_id),
+                )
             except Exception as exc:
                 logger.warning("LLM task compression failed", error=str(exc))
 
         # Fallback: keep system + last few messages
-        return self.build_output(snapshot, self._keep_recent(messages, token_budget))
+        return self.build_output(
+            snapshot,
+            self._keep_recent(messages, token_budget),
+            degraded=True,
+            error="task_fallback_keep_recent",
+        )
 
     def _keep_recent(
         self, messages: list[dict[str, Any]], token_budget: int

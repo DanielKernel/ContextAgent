@@ -187,6 +187,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 session_id=scope_id,
             )
         except Exception as exc:
+            logger.warning("ltm.add_messages failed", scope_id=scope_id, error=str(exc))
             raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def delete_by_id(self, scope_id: str, memory_id: str) -> None:
@@ -199,7 +200,8 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 scope_id=scope_id,
             )
         except Exception as exc:
-            raise AdapterError("LTM", str(exc)) from exc
+            logger.warning("ltm.delete_by_id failed", scope_id=scope_id, memory_id=memory_id, error=str(exc))
+            raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def update_by_id(
         self,
@@ -219,7 +221,8 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 updates=updates,
             )
         except Exception as exc:
-            raise AdapterError("LTM", str(exc)) from exc
+            logger.warning("ltm.update_by_id failed", scope_id=scope_id, memory_id=memory_id, error=str(exc))
+            raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def health_check(self) -> bool:
         try:
@@ -233,7 +236,8 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 threshold=0.0,
             )
             return True
-        except Exception:
+        except Exception as exc:
+            logger.debug("ltm health check failed", error=str(exc))
             return False
 
     async def agentic_search(

@@ -117,7 +117,7 @@ class CompactionStrategy(CompressionStrategy):
                 if data.get("current_status"):
                     summary_parts.append(f"## Current Status\n{data['current_status']}")
                 return [{"role": "system", "content": "\n\n".join(summary_parts)}]
-            return compressed
+            return self.validate_messages(compressed, strategy_id=self.strategy_id)
         except Exception as exc:
             logger.warning("compaction LLM call failed, using structured truncate", error=str(exc))
             return self._structured_truncate(messages, token_budget)

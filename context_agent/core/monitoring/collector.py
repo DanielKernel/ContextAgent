@@ -131,8 +131,8 @@ class MonitoringCollector:
                 span.set_attribute("context_agent.operation", record.operation)
                 span.set_attribute("context_agent.latency_ms", record.latency_ms)
                 span.set_attribute("context_agent.status", record.status)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("otel metric emission failed", error=str(exc), operation=record.operation)
 
     @staticmethod
     def _emit_prometheus(record: MetricRecord) -> None:
@@ -147,5 +147,9 @@ class MonitoringCollector:
                 operation=record.operation,
                 status=record.status,
             ).inc()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "prometheus metric emission failed",
+                error=str(exc),
+                operation=record.operation,
+            )
