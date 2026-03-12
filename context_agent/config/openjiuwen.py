@@ -166,16 +166,27 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     router_kwargs["working_memory"] = working_memory
 
     if runtime_settings.openjiuwen_config_path:
-        ltm_adapter = build_openjiuwen_ltm_adapter(
-            runtime_settings.openjiuwen_config_path
-        )
-        memory_processor = AsyncMemoryProcessor(ltm=ltm_adapter)
-        router_kwargs["memory_processor"] = memory_processor
-        router_kwargs["memory_orchestrator"] = MemoryOrchestrator(
-            working_memory=working_memory,
-            async_processor=memory_processor,
-        )
-        aggregator_kwargs["ltm"] = ltm_adapter
+        try:
+            ltm_adapter = build_openjiuwen_ltm_adapter(
+                runtime_settings.openjiuwen_config_path
+            )
+        except ContextAgentError as exc:
+            if exc.code != ErrorCode.OPENJIUWEN_UNAVAILABLE:
+                raise
+            logger.warning(
+                "openJiuwen long-term memory unavailable, starting with working memory only",
+                config_path=runtime_settings.openjiuwen_config_path,
+                error=str(exc),
+                details=exc.details,
+            )
+        else:
+            memory_processor = AsyncMemoryProcessor(ltm=ltm_adapter)
+            router_kwargs["memory_processor"] = memory_processor
+            router_kwargs["memory_orchestrator"] = MemoryOrchestrator(
+                working_memory=working_memory,
+                async_processor=memory_processor,
+            )
+            aggregator_kwargs["ltm"] = ltm_adapter
     else:
         logger.info(
             "starting without openJiuwen long-term memory",

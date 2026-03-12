@@ -71,6 +71,32 @@ def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path)
     assert router._memory_processor is not None
 
 
+def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeypatch, tmp_path):
+    config_path = tmp_path / "openjiuwen.yaml"
+    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+
+    def _raise(_path):
+        raise ContextAgentError(
+            "unsupported constructor",
+            code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+        )
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
+        _raise,
+    )
+
+    router = build_default_api_router(
+        settings=Settings(openjiuwen_config_path=str(config_path))
+    )
+
+    assert isinstance(router, ContextAPIRouter)
+    assert router._aggregator._ltm is None
+    assert router._working_memory is not None
+    assert router._memory_orchestrator is None
+    assert router._memory_processor is None
+
+
 def test_instantiate_long_term_memory_with_config_keyword():
     class FakeLongTermMemory:
         def __init__(self, config):
