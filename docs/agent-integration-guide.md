@@ -320,6 +320,270 @@ ltm = LongTermMemory(config={
 ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
 ```
 
+### 5.1.1 设计边界：长期记忆必须通过 openJiuwen 接入
+
+ContextAgent **不直接连接**向量数据库、图数据库或外部知识库。  
+长期记忆后端（向量库、embedding 模型、索引参数、召回策略）统一由 **openJiuwen `LongTermMemory`** 管理，ContextAgent 只通过 `OpenJiuwenLTMAdapter` 调用：
+
+- `search_user_mem(...)`
+- `add_messages(...)`
+- `delete_mem_by_id(...)`
+- `update_mem_by_id(...)`
+
+这意味着：
+
+1. **向量数据库连接配置写在 openJiuwen**，不写在 ContextAgent 业务代码里。
+2. **embedding / LLM 配置写在 openJiuwen**，由 `LongTermMemory` 及检索组件消费。
+3. ContextAgent 侧只负责把 openJiuwen 返回的结果转换为 `ContextItem`，并参与后续聚合、压缩、暴露控制和注入。
+
+### 5.1.2 openJiuwen 长期记忆配置模板
+
+下面给出一个推荐的 `LongTermMemory(config=...)` 配置结构。实际字段名以你们使用的 openJiuwen 版本为准；如有差异，应在 **openJiuwen 配置层** 做适配，而不是在 ContextAgent 中直连数据库。
+
+```python
+openjiuwen_ltm_config = {
+    "user_id": "context-agent",
+    "llm_config": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "https://api.openai.com/v1",
+        "timeout": 30,
+        "max_retries": 2,
+    },
+    "embedding_config": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "api_key": "${OPENAI_API_KEY}",
+        "base_url": "https://api.openai.com/v1",
+        "dimension": 3072,
+        "batch_size": 32,
+    },
+    "vector_store": {
+        "backend": "qdrant",               # qdrant | pgvector | milvus
+        "collection_name": "context_agent_memory",
+        "distance": "Cosine",
+    },
+    "memory_config": {
+        "top_k": 10,
+        "score_threshold": 0.3,
+        "enable_user_profile": True,
+        "enable_semantic_memory": True,
+        "enable_episodic_memory": True,
+        "enable_summary_memory": True,
+    },
+}
+```
+
+#### 推荐的 payload / metadata 字段
+
+为了让 ContextAgent 在召回、隔离和过滤上工作更稳定，建议 openJiuwen 写入向量库时至少保留这些字段：
+
+- `scope_id`：租户 / 用户 / 频道隔离键
+- `session_id`：会话标识（可选，但推荐）
+- `memory_type`：如 `semantic` / `episodic` / `procedural`
+- `content`：原始可检索文本
+- `source`：来源系统或来源模块
+- `created_at`
+- `updated_at`
+- `tags`
+
+其中 `scope_id` 是最关键字段。ContextAgent 当前默认用 `scope_id` 作为长期记忆隔离边界。
+
+### 5.1.3 向量数据库配置示例
+
+#### Qdrant
+
+```python
+openjiuwen_ltm_config = {
+    "user_id": "context-agent",
+    "llm_config": {...},
+    "embedding_config": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "api_key": "${OPENAI_API_KEY}",
+        "dimension": 3072,
+    },
+    "vector_store": {
+        "backend": "qdrant",
+        "host": "127.0.0.1",
+        "port": 6333,
+        "api_key": "",
+        "https": False,
+        "collection_name": "context_agent_memory",
+        "distance": "Cosine",
+        "recreate_if_exists": False,
+        "payload_schema": {
+            "scope_id": "keyword",
+            "memory_type": "keyword",
+            "session_id": "keyword",
+            "created_at": "datetime",
+        },
+    },
+}
+```
+
+#### pgvector
+
+```python
+openjiuwen_ltm_config = {
+    "user_id": "context-agent",
+    "llm_config": {...},
+    "embedding_config": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "api_key": "${OPENAI_API_KEY}",
+        "dimension": 3072,
+    },
+    "vector_store": {
+        "backend": "pgvector",
+        "dsn": "postgresql://postgres:password@127.0.0.1:5432/context_agent",
+        "table_name": "ltm_memory",
+        "embedding_dimension": 3072,
+        "distance": "cosine",
+        "index_type": "ivfflat",
+        "lists": 100,
+    },
+}
+```
+
+#### Milvus
+
+```python
+openjiuwen_ltm_config = {
+    "user_id": "context-agent",
+    "llm_config": {...},
+    "embedding_config": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "api_key": "${OPENAI_API_KEY}",
+        "dimension": 3072,
+    },
+    "vector_store": {
+        "backend": "milvus",
+        "uri": "http://127.0.0.1:19530",
+        "token": "",
+        "collection_name": "context_agent_memory",
+        "embedding_dimension": 3072,
+        "metric_type": "COSINE",
+        "index_type": "HNSW",
+        "index_params": {
+            "M": 16,
+            "efConstruction": 200,
+        },
+        "search_params": {
+            "ef": 64,
+        },
+    },
+}
+```
+
+#### 选型建议
+
+- **开发环境**：优先 `Qdrant`，启动快、调试简单。
+- **通用生产环境**：优先 `pgvector`，利于与业务数据统一治理。
+- **大规模高吞吐向量场景**：优先 `Milvus`。
+
+### 5.1.4 基于 openJiuwen 的 LLM 配置指导
+
+当前 ContextAgent 的长期记忆、检索增强和部分压缩能力，应该通过 openJiuwen 侧的 LLM/Embedding 配置提供底层模型能力。推荐把模型配置分成两类：
+
+#### A. `llm_config`：生成 / 摘要 / agentic retrieval
+
+```python
+"llm_config": {
+    "provider": "openai",              # 或兼容 OpenAI API 的网关
+    "model": "gpt-4o-mini",
+    "api_key": "${OPENAI_API_KEY}",
+    "base_url": "https://api.openai.com/v1",
+    "timeout": 30,
+    "max_retries": 2,
+}
+```
+
+这个配置通常会被 openJiuwen 用于：
+
+- 长期记忆摘要与压缩
+- 复杂查询下的 `agentic_retrieve`
+- 记忆去重、冲突检测、结构化提取
+
+#### B. `embedding_config`：向量化
+
+```python
+"embedding_config": {
+    "provider": "openai",
+    "model": "text-embedding-3-large",
+    "api_key": "${OPENAI_API_KEY}",
+    "base_url": "https://api.openai.com/v1",
+    "dimension": 3072,
+    "batch_size": 32,
+}
+```
+
+关键要求：
+
+1. `dimension` 必须与向量库集合/表的维度一致。
+2. 不同环境不要混用维度不同的 embedding 模型。
+3. 如果更换 embedding 模型，通常需要重建索引或重新写入历史向量。
+
+### 5.1.5 推荐的 openJiuwen 配置文件写法
+
+若你们将 openJiuwen 配置独立维护，建议放到单独文件中，例如 `config/openjiuwen.yaml` 或 `config/openjiuwen.json`，再由 ContextAgent 在启动时读取。
+
+示例：
+
+```yaml
+user_id: context-agent
+
+llm_config:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  timeout: 30
+  max_retries: 2
+
+embedding_config:
+  provider: openai
+  model: text-embedding-3-large
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  dimension: 3072
+  batch_size: 32
+
+vector_store:
+  backend: qdrant
+  host: 127.0.0.1
+  port: 6333
+  collection_name: context_agent_memory
+  distance: Cosine
+
+memory_config:
+  top_k: 10
+  score_threshold: 0.3
+  enable_user_profile: true
+  enable_semantic_memory: true
+  enable_episodic_memory: true
+  enable_summary_memory: true
+```
+
+### 5.1.6 在 ContextAgent 中加载 openJiuwen 配置
+
+```python
+from pathlib import Path
+import yaml
+
+from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
+from openjiuwen.core.memory.long_term_memory import LongTermMemory
+
+cfg = yaml.safe_load(Path("config/openjiuwen.yaml").read_text())
+
+ltm = LongTermMemory(config=cfg)
+ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
+```
+
+若使用本项目 `Settings`，建议通过 `CA_OPENJIUWEN_CONFIG_PATH` 指向该配置文件，再在应用启动阶段统一加载。
+
 ### 5.2 检索器适配器
 
 ```python
@@ -357,11 +621,42 @@ from context_agent.adapters.retriever_adapter import OpenJiuwenRetrieverAdapter
 from context_agent.core.memory.tiered_router import TieredMemoryRouter
 from context_agent.core.context.jit_resolver import JITResolver
 import redis.asyncio as aioredis
+from openjiuwen.core.memory.long_term_memory import LongTermMemory
+from openjiuwen.core.retrieval.retriever.hybrid_retriever import HybridRetriever
+from openjiuwen.core.retrieval.reranker import StandardReranker
 
 redis_client = aioredis.from_url("redis://localhost:6379/0")
 
+openjiuwen_cfg = {
+    "user_id": "context-agent",
+    "llm_config": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "api_key": "${OPENAI_API_KEY}",
+    },
+    "embedding_config": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "api_key": "${OPENAI_API_KEY}",
+        "dimension": 3072,
+    },
+    "vector_store": {
+        "backend": "qdrant",
+        "host": "127.0.0.1",
+        "port": 6333,
+        "collection_name": "context_agent_memory",
+    },
+}
+
+openjiuwen_ltm = LongTermMemory(config=openjiuwen_cfg)
+openjiuwen_retriever = HybridRetriever(config=openjiuwen_cfg)
+openjiuwen_reranker = StandardReranker(config=openjiuwen_cfg)
+
 ltm_adapter = OpenJiuwenLTMAdapter(ltm=openjiuwen_ltm)
-retriever_adapter = OpenJiuwenRetrieverAdapter(hybrid_retriever=openjiuwen_retriever)
+retriever_adapter = OpenJiuwenRetrieverAdapter(
+    hybrid_retriever=openjiuwen_retriever,
+    reranker=openjiuwen_reranker,
+)
 
 tiered_router = TieredMemoryRouter(
     ltm=ltm_adapter,
