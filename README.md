@@ -49,22 +49,29 @@ make run-dev
 
 **方式二：使用 Python 3 虚拟环境**
 
-适用于未安装 uv 的环境：
+适用于未安装 uv 的环境。推荐先按下面的 **原生命令** 操作；如果你偏好快捷方式，也可以使用后面的 `make venv-*` 命令。
 
 ```bash
-# 一步创建虚拟环境并安装所有依赖（使用 requirements.txt 快照）
-make venv-install
-# 等价命令：
-#   python3 -m venv .venv
-#   .venv/bin/pip install -r requirements.txt
-#   .venv/bin/pip install -e . --no-deps
+# 1) 创建 Python 3 虚拟环境
+python3 -m venv .venv
 
-# 激活虚拟环境（手动使用时）
+# 2) 安装依赖
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e . --no-deps
+
+# 3) 激活虚拟环境（可选，便于手动执行命令）
 source .venv/bin/activate
 
-# 启动开发服务
-make venv-run
-# 或激活后：python3 -m uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
+# 4) 启动开发服务
+.venv/bin/python3 -m uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
+```
+
+也可以使用 `Makefile` 快捷命令（底层仍然是 Python 3 虚拟环境）：
+
+```bash
+make venv-install   # 等价于：创建 .venv + 安装 requirements.txt + pip install -e .
+make venv-run       # 等价于：.venv/bin/python3 -m uvicorn ...
+make venv-test      # 在 .venv 中运行测试
 ```
 
 ### 5 行接入
@@ -286,4 +293,3 @@ python3 examples/business_agent.py     # 完整 CRM 客服 Agent 集成
 - [docs/requirements-analysis.md](docs/requirements-analysis.md) — 需求分析说明书（16 UC）
 - [docs/architecture-design.md](docs/architecture-design.md) — 架构设计文档（4+1 视图）
 - [docs/agent-integration-guide.md](docs/agent-integration-guide.md) — **业务 Agent 接入指导**
-
