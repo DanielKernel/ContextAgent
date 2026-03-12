@@ -158,7 +158,7 @@ class JITResolver:
                 raw = await self._redis.get(full_key)
             else:
                 entry = self._local_cache.get(full_key)
-                raw = json.dumps(entry[0][0].model_dump()) if entry else None
+                raw = json.dumps(entry[0][0].model_dump(mode="json")) if entry else None
 
             if raw:
                 data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw

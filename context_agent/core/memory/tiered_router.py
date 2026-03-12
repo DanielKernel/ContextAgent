@@ -150,7 +150,8 @@ class TieredMemoryRouter:
             if self._redis is not None:
                 await self._redis.setex(cache_key, ttl_s, json.dumps(data))
             else:
-                self._local_cache[cache_key] = (items, time.monotonic())
+                local_items = [item for item in items if item.memory_type in _HOT_TIER_MEMORY_TYPES]
+                self._local_cache[cache_key] = (local_items, time.monotonic())
         except Exception as exc:
             logger.warning("hot tier warm failed", scope_id=scope_id, error=str(exc))
 
@@ -238,8 +239,7 @@ class TieredMemoryRouter:
                             entry["active_count"] = entry.get("active_count", 0) + 1
                             changed = True
                     if changed:
-                        ttl = self._settings.hot_tier_ttl_s
-                        await self._redis.setex(cache_key, ttl, json.dumps(data))
+                        await self._redis.setex(cache_key, HOT_TIER_TTL_S, json.dumps(data))
             else:
                 # Update in-process cache
                 entry = self._local_cache.get(cache_key)

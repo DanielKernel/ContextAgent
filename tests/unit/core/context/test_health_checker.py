@@ -41,8 +41,8 @@ class TestContextHealthChecker:
         checker = ContextHealthChecker()
         report = await checker.check(snap)
         # Distraction risk should be elevated
-        risk_types = [r.risk_type for r in report.risks]
-        assert "distraction" in risk_types
+        risk_types = [r.risk_type.value for r in report.risks]
+        assert "context_distraction" in risk_types
 
     async def test_empty_snapshot_is_healthy(self):
         snap = _make_snapshot([])

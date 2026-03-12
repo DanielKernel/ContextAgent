@@ -1,10 +1,11 @@
 """ContextAPIRouter — unified facade (UC007).
 
 Routes incoming ContextRequests to the correct pipeline based on OutputType:
-  - COMPRESSED  → aggregate + compress
-  - RAW         → aggregate only
-  - STRUCTURED  → aggregate + compression with structured JSON output
-  - SNAPSHOT    → create a version snapshot and return version info
+  - COMPRESSED / SUMMARY / COMPRESSED_BACKGROUND → aggregate + compress
+  - RAW                                          → aggregate only
+  - SEARCH                                       → tiered recall results
+  - STRUCTURED                                   → aggregate + structured compression
+  - SNAPSHOT                                     → create a version snapshot and return version info
 """
 
 from __future__ import annotations
@@ -134,6 +135,22 @@ class ContextAPIRouter:
             if output_type == OutputType.RAW:
                 output = self._build_raw_output(snapshot)
 
+            elif output_type == OutputType.SEARCH:
+                search_items = await self._build_search_items(
+                    snapshot=snapshot,
+                    scope_id=scope_id,
+                    query=query,
+                    top_k=top_k,
+                )
+                output = ContextOutput(
+                    scope_id=scope_id,
+                    session_id=session_id,
+                    output_type=OutputType.SEARCH,
+                    content="\n\n".join(item.content for item in search_items),
+                    token_count=sum(len(item.content) // 4 for item in search_items),
+                    search_items=search_items,
+                )
+
             elif output_type == OutputType.SNAPSHOT:
                 version = await self._vm.create_snapshot(
                     snapshot, label=f"api:{query[:32]}"
@@ -146,7 +163,7 @@ class ContextAPIRouter:
                     token_count=snapshot.total_tokens,
                 )
 
-            else:  # COMPRESSED or STRUCTURED
+            else:  # COMPRESSED / SUMMARY / COMPRESSED_BACKGROUND / STRUCTURED
                 ctx = StrategySelectionContext(
                     scope_id=scope_id,
                     task_type=task_type,
@@ -157,6 +174,15 @@ class ContextAPIRouter:
                 if output_type == OutputType.STRUCTURED:
                     ctx.task_type = ctx.task_type or "compaction"
                 output = await self._compression.route_and_compress(snapshot, ctx)
+                if output_type in (OutputType.SUMMARY, OutputType.COMPRESSED_BACKGROUND):
+                    output = output.model_copy(
+                        update={
+                            "output_type": output_type,
+                            "compressed_text": output.content,
+                        }
+                    )
+                elif output_type == OutputType.STRUCTURED:
+                    output = output.model_copy(update={"output_type": OutputType.STRUCTURED})
 
             latency = record_latency(t0)
             logger.info(
@@ -179,6 +205,25 @@ class ContextAPIRouter:
             content=text,
             token_count=len(text) // 4,
         )
+
+    async def _build_search_items(
+        self,
+        *,
+        snapshot: ContextSnapshot,
+        scope_id: str,
+        query: str,
+        top_k: int,
+    ) -> list[Any]:
+        """Return tiered-recall results for SEARCH output, falling back to aggregated items."""
+        if self._tiered_router is None:
+            return snapshot.items[:top_k]
+
+        items, _latencies = await self._tiered_router.search(
+            scope_id=scope_id,
+            query=query,
+            top_k=top_k,
+        )
+        return items
 
     async def mark_used(
         self, scope_id: str, session_id: str, item_ids: list[str]

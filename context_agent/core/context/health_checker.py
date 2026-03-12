@@ -167,9 +167,11 @@ class ContextHealthChecker:
 
     async def _check_confusion(self, snapshot: ContextSnapshot) -> RiskIndicator:
         """High score when multiple items have similar scores suggesting ambiguity."""
-        if len(snapshot.items) < 3:
+        if len(snapshot.items) < 5:
             return RiskIndicator(RiskType.CONFUSION, 0.0)
         scores = sorted([i.score for i in snapshot.items], reverse=True)
+        if scores[2] >= 0.8:
+            return RiskIndicator(RiskType.CONFUSION, 0.0)
         top3_spread = scores[0] - scores[2] if len(scores) >= 3 else 1.0
         # Low spread in top scores → many equally-ranked items → potential confusion
         score = max(0.0, 1.0 - top3_spread * 2)

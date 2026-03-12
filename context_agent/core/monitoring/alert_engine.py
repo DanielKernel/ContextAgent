@@ -45,26 +45,31 @@ class AlertEngine:
             (
                 record.latency_ms > cfg.latency_p95_threshold_ms,
                 "latency_breach",
-                f"latency {record.latency_ms:.1f}ms > threshold {cfg.latency_p95_threshold_ms}ms",
+                lambda: f"latency {record.latency_ms:.1f}ms > threshold {cfg.latency_p95_threshold_ms}ms",
             ),
             (
                 record.token_count is not None and record.token_count > cfg.token_budget_threshold,
                 "token_budget_breach",
-                f"tokens {record.token_count} > threshold {cfg.token_budget_threshold}",
+                lambda: f"tokens {record.token_count} > threshold {cfg.token_budget_threshold}",
             ),
             (
                 record.status == "error",
                 "error_status",
-                f"operation '{record.operation}' returned error",
+                lambda: f"operation '{record.operation}' returned error",
             ),
             (
                 record.health_score is not None and record.health_score < cfg.health_score_min,
                 "low_health_score",
-                f"health score {record.health_score:.2f} < minimum {cfg.health_score_min}",
+                lambda: f"health score {record.health_score:.2f} < minimum {cfg.health_score_min}",
+            ),
+            (
+                record.quality_score < cfg.quality_score_threshold,
+                "quality_degradation",
+                lambda: f"quality score {record.quality_score:.2f} < threshold {cfg.quality_score_threshold}",
             ),
         ]
 
-        for triggered, alert_key, message in checks:
+        for triggered, alert_key, message_factory in checks:
             if triggered:
                 full_key = f"{alert_key}:{record.scope_id}:{record.operation}"
                 if self._in_cooldown(full_key):
@@ -73,7 +78,7 @@ class AlertEngine:
                     alert_key=alert_key,
                     scope_id=record.scope_id,
                     operation=record.operation,
-                    message=message,
+                    message=message_factory(),
                     record=record,
                 )
                 self._cooldowns[full_key] = time.monotonic()

@@ -11,16 +11,16 @@
 
 ## 示例总览
 
-| 示例 | 主要能力 | 适合场景 | 如何定制 |
+| 示例 | 对应 UC | 主要能力 | 适合场景 | 如何定制 |
 | --- | --- | --- | --- |
-| `basic_recall.py` | 最小化上下文召回、`ContextAggregator` | 快速理解“查什么、返回什么” | 替换 `StubLTM`、修改 `AggregationRequest`、调整 `top_k` / `token_budget` |
-| `compression_demo.py` | 压缩策略注册、手工策略、压缩路由 | 设计自己的压缩输出格式 | 新增 `CompressionStrategy`、替换 `schedule()`、修改 `ContextSnapshot` 内容 |
-| `tool_governance.py` | 工具选择、工具上下文裁剪 | 大工具集场景，避免上下文膨胀 | 修改 `ToolDefinition`、扩展 `task_type`、替换工具描述和分类 |
-| `sub_agent_delegation.py` | 子代理上下文隔离、暴露控制、结果回流 | 主 Agent 向子 Agent 委派任务 | 修改 `ExposurePolicy`、替换 parent snapshot、调整 child 可见 source types |
-| `business_agent.py` | 业务 Agent 综合集成 | CRM / support / enterprise agent 原型 | 替换 CRM stub 数据、注入真实 LTM、替换压缩策略、接入真实工具治理 |
-| `configs/pgvector/context_agent.yaml` + `configs/pgvector/openjiuwen.yaml` | 默认 pgvector 双配置样例 | 本地 / 默认部署 | 修改端口、日志、DSN、embedding 维度、索引参数、模型配置 |
-| `configs/qdrant/context_agent.yaml` + `configs/qdrant/openjiuwen.yaml` | qdrant 双配置样例 | 轻量试验环境 | 修改 host/port/collection、模型配置、服务参数 |
-| `configs/milvus/context_agent.yaml` + `configs/milvus/openjiuwen.yaml` | milvus 双配置样例 | 高吞吐向量检索场景 | 修改 `uri`、collection、index/search 参数、服务参数 |
+| `basic_recall.py` | `UC001` / `UC007` | 最小化上下文召回、`ContextAggregator` | 快速理解“查什么、返回什么” | 替换 `StubLTM`、修改 `AggregationRequest`、调整 `top_k` / `token_budget` |
+| `compression_demo.py` | `UC009` | 压缩策略注册、手工策略、压缩路由 | 设计自己的压缩输出格式 | 新增 `CompressionStrategy`、替换 `schedule()`、修改 `ContextSnapshot` 内容 |
+| `tool_governance.py` | `UC011` | 工具选择、工具上下文裁剪 | 大工具集场景，避免上下文膨胀 | 修改 `ToolDefinition`、扩展 `task_type`、替换工具描述和分类 |
+| `sub_agent_delegation.py` | `UC006` / `UC014` | 子代理上下文隔离、暴露控制、结果回流 | 主 Agent 向子 Agent 委派任务 | 修改 `ExposurePolicy`、替换 parent snapshot、调整 child 可见 source types |
+| `business_agent.py` | `UC001` / `UC007` / `UC009` / `UC011` | 业务 Agent 综合集成 | CRM / support / enterprise agent 原型 | 替换 CRM stub 数据、注入真实 LTM、替换压缩策略、接入真实工具治理 |
+| `configs/pgvector/context_agent.yaml` + `configs/pgvector/openjiuwen.yaml` | 配置基线 | 默认 pgvector 双配置样例 | 本地 / 默认部署 | 修改端口、日志、DSN、embedding 维度、索引参数、模型配置 |
+| `configs/qdrant/context_agent.yaml` + `configs/qdrant/openjiuwen.yaml` | 配置基线 | qdrant 双配置样例 | 轻量试验环境 | 修改 host/port/collection、模型配置、服务参数 |
+| `configs/milvus/context_agent.yaml` + `configs/milvus/openjiuwen.yaml` | 配置基线 | milvus 双配置样例 | 高吞吐向量检索场景 | 修改 `uri`、collection、index/search 参数、服务参数 |
 
 ## Python 示例详解
 
@@ -180,6 +180,11 @@
 3. 如果工具很多，接着看 `tool_governance.py`
 4. 如果存在主从 Agent 协作，再看 `sub_agent_delegation.py`
 5. 最后以 `business_agent.py` 为蓝本接入真实业务
+
+如果你希望把示例与测试一一对照，可以同时查看：
+
+- `tests/README.md`：需求用例到测试文件的覆盖矩阵
+- `docs/requirements-analysis.md`：UC001–UC016 的原始需求描述
 
 如果你要接入真实长期记忆：
 

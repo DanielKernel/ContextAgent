@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from context_agent.core.monitoring.alert_engine import AlertEngine
 from context_agent.core.monitoring.collector import MonitoringCollector
@@ -41,7 +41,7 @@ class TestMonitoringCollector:
         await collector.stop()
         assert len(received) == 1
 
-    def test_emit_sync_non_blocking(self):
+    async def test_emit_sync_non_blocking(self):
         collector = MonitoringCollector()
         record = _make_record()
         collector.emit_sync(record)  # should not raise
@@ -94,3 +94,43 @@ class TestAlertEngine:
         engine._fire = lambda **kw: fired.append(kw)  # type: ignore
         engine.evaluate_batch([_make_record(health_score=0.2)])
         assert any(f["alert_key"] == "low_health_score" for f in fired)
+
+    def test_token_budget_breach_fires_alert(self):
+        config = AlertConfig(token_budget_threshold=100, cooldown_s=0.0)
+        engine = AlertEngine(config)
+        fired = []
+        engine._fire = lambda **kw: fired.append(kw)  # type: ignore
+        engine.evaluate_batch([_make_record(token_count=150)])
+        assert any(f["alert_key"] == "token_budget_breach" for f in fired)
+
+    def test_quality_degradation_fires_alert(self):
+        config = AlertConfig(quality_score_threshold=0.8, cooldown_s=0.0)
+        engine = AlertEngine(config)
+        fired = []
+        engine._fire = lambda **kw: fired.append(kw)  # type: ignore
+        engine.evaluate_batch([_make_record(quality_score=0.2)])
+        assert any(f["alert_key"] == "quality_degradation" for f in fired)
+
+    def test_update_config_replaces_thresholds(self):
+        engine = AlertEngine(AlertConfig(latency_p95_threshold_ms=500.0))
+        engine.update_config(AlertConfig(latency_p95_threshold_ms=100.0))
+        fired = []
+        engine._fire = lambda **kw: fired.append(kw)  # type: ignore
+        engine.evaluate_batch([_make_record(latency_ms=150.0)])
+        assert any(f["alert_key"] == "latency_breach" for f in fired)
+
+    def test_fire_schedules_webhook_when_configured(self):
+        engine = AlertEngine(webhook_url="https://example.com/webhook")
+        record = _make_record(latency_ms=500.0)
+        with patch(
+            "context_agent.core.monitoring.alert_engine.asyncio.create_task",
+            side_effect=lambda coro: coro.close(),
+        ) as create_task:
+            engine._fire(
+                alert_key="latency_breach",
+                scope_id="s1",
+                operation="test",
+                message="latency high",
+                record=record,
+            )
+        create_task.assert_called_once()

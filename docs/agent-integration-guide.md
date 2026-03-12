@@ -406,3 +406,33 @@ HTTP / OpenClaw ingest
 3. 然后看 `examples/configs/<backend>/`
 4. 如需接入 OpenClaw，再看 `docs/openclaw-integration.md`
 5. 如需理解测试范围，再看 `tests/README.md`
+
+---
+
+## 11. 用例验证入口
+
+如果你希望按需求文档中的用例来验证当前实现，建议对照：
+
+- 需求来源：`docs/requirements-analysis.md`
+- 测试覆盖矩阵：`tests/README.md`
+- 关键性能 smoke tests：`tests/performance/test_usecase_latency.py`
+
+推荐命令：
+
+```bash
+python3 -m pytest \
+  tests/unit/core/memory/test_tiered_router.py \
+  tests/unit/core/memory/test_async_processor.py \
+  tests/unit/test_api_router_outputs.py \
+  tests/unit/core/monitoring/test_monitoring.py \
+  tests/performance/test_usecase_latency.py
+```
+
+如果要验证更完整的主链路，再补跑：
+
+```bash
+python3 -m pytest \
+  tests/integration/test_e2e_pipeline.py \
+  tests/integration/test_sub_agent_flow.py \
+  tests/unit/test_openclaw_bridge.py
+```
