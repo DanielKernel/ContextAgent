@@ -6,7 +6,10 @@ import pytest
 
 from context_agent.models.context import ContextItem, ContextOutput, ContextSnapshot, OutputType
 from context_agent.strategies.base import CompressionStrategy
-from context_agent.strategies.registry import StrategyRegistry
+from context_agent.strategies.registry import (
+    StrategyRegistry,
+    ensure_default_strategies_registered,
+)
 from context_agent.utils.errors import StrategyNotFoundError
 
 
@@ -73,6 +76,12 @@ class TestStrategyRegistry:
         registry.register(_DoubleStrategy())
         registry.unregister("double_test")
         assert "double_test" not in registry.list()
+
+    def test_ensure_default_strategies_registered(self):
+        registry = StrategyRegistry.instance()
+        ensure_default_strategies_registered()
+        assert "qa" in registry.list()
+        assert "task" in registry.list()
 
 
 class TestDoubleStrategy:

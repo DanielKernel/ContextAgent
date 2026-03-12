@@ -16,7 +16,10 @@ from context_agent.orchestration.strategy_scheduler import (
     StrategySchedule,
     StrategySelectionContext,
 )
-from context_agent.strategies.registry import StrategyRegistry
+from context_agent.strategies.registry import (
+    StrategyRegistry,
+    ensure_default_strategies_registered,
+)
 from context_agent.utils.errors import ContextAgentError, ErrorCode, StrategyNotFoundError
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
@@ -28,6 +31,7 @@ class CompressionStrategyRouter:
     """Applies the best available compression strategy to a ContextSnapshot."""
 
     def __init__(self, scheduler: HybridStrategyScheduler | None = None) -> None:
+        ensure_default_strategies_registered()
         self._scheduler = scheduler or HybridStrategyScheduler()
         self._registry = StrategyRegistry.instance()
 

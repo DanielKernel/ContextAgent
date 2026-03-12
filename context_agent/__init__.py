@@ -37,7 +37,10 @@ from context_agent.orchestration.strategy_scheduler import (
     StrategySelectionContext,
 )
 from context_agent.orchestration.sub_agent_manager import SubAgentContextManager
-from context_agent.strategies.registry import StrategyRegistry
+from context_agent.strategies.registry import (
+    StrategyRegistry,
+    ensure_default_strategies_registered,
+)
 from context_agent.utils.logging import configure_logging, get_logger
 
 __version__ = "0.1.0"
@@ -73,29 +76,5 @@ __all__ = [
     "__version__",
 ]
 
-
-def _register_default_strategies() -> None:
-    """Register all built-in compression strategies into the global registry."""
-    from context_agent.strategies.compaction_strategy import CompactionStrategy
-    from context_agent.strategies.long_session_strategy import LongSessionCompressionStrategy
-    from context_agent.strategies.qa_strategy import QACompressionStrategy
-    from context_agent.strategies.realtime_strategy import RealtimeCompressionStrategy
-    from context_agent.strategies.task_strategy import TaskCompressionStrategy
-
-    registry = StrategyRegistry.instance()
-    strategies = [
-        QACompressionStrategy(),
-        TaskCompressionStrategy(),
-        LongSessionCompressionStrategy(),
-        RealtimeCompressionStrategy(),
-        CompactionStrategy(),
-    ]
-    for strategy in strategies:
-        try:
-            registry.register(strategy)
-        except ValueError:
-            pass  # already registered (e.g. on reimport)
-
-
 # Auto-register built-in strategies on import
-_register_default_strategies()
+ensure_default_strategies_registered()

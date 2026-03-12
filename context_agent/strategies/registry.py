@@ -55,3 +55,26 @@ class StrategyRegistry:
     def reset(cls) -> None:
         """Reset the singleton — used in tests only."""
         cls._instance = None
+
+
+def ensure_default_strategies_registered() -> None:
+    """Register built-in compression strategies if they are missing."""
+    from context_agent.strategies.compaction_strategy import CompactionStrategy
+    from context_agent.strategies.long_session_strategy import LongSessionCompressionStrategy
+    from context_agent.strategies.qa_strategy import QACompressionStrategy
+    from context_agent.strategies.realtime_strategy import RealtimeCompressionStrategy
+    from context_agent.strategies.task_strategy import TaskCompressionStrategy
+
+    registry = StrategyRegistry.instance()
+    strategies = [
+        QACompressionStrategy(),
+        TaskCompressionStrategy(),
+        LongSessionCompressionStrategy(),
+        RealtimeCompressionStrategy(),
+        CompactionStrategy(),
+    ]
+    for strategy in strategies:
+        try:
+            registry.register(strategy)
+        except ValueError:
+            continue

@@ -13,7 +13,10 @@ from dataclasses import dataclass, field
 
 from context_agent.core.retrieval.search_coordinator import RetrievalPlan, UnifiedSearchCoordinator
 from context_agent.core.retrieval.tool_governor import ToolContextGovernor
-from context_agent.strategies.registry import StrategyRegistry
+from context_agent.strategies.registry import (
+    StrategyRegistry,
+    ensure_default_strategies_registered,
+)
 from context_agent.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -56,15 +59,16 @@ class HybridStrategyScheduler:
 
     # Task-type → preferred strategy IDs (in priority order)
     TASK_TYPE_MAP: dict[str, list[str]] = {
-        "qa": ["qa_compression"],
-        "task": ["task_compression"],
-        "long_session": ["long_session_compression"],
-        "realtime": ["realtime_compression"],
+        "qa": ["qa"],
+        "task": ["task"],
+        "long_session": ["long_session"],
+        "realtime": ["realtime"],
         "compaction": ["compaction"],
     }
 
     def schedule(self, ctx: StrategySelectionContext) -> StrategySchedule:
         """Return a StrategySchedule for the given context."""
+        ensure_default_strategies_registered()
         registry = StrategyRegistry.instance()
         available = set(registry.list())
 
@@ -82,20 +86,20 @@ class HybridStrategyScheduler:
         # 2. Fallback: auto-select based on signals
         if not strategy_ids:
             if ctx.turn_count > 20:
-                strategy_ids = ["long_session_compression"]
-                notes.append("Auto-selected long_session_compression (turn_count>20)")
+                strategy_ids = ["long_session"]
+                notes.append("Auto-selected long_session (turn_count>20)")
             elif ctx.utilisation > 0.8:
                 strategy_ids = ["compaction"]
                 notes.append("Auto-selected compaction (utilisation>80%)")
             elif ctx.task_type == "":
-                strategy_ids = ["qa_compression"]
-                notes.append("Auto-selected qa_compression (default fallback)")
+                strategy_ids = ["qa"]
+                notes.append("Auto-selected qa (default fallback)")
 
         # 3. Realtime override for very low budget
-        if ctx.utilisation > 0.95 and "realtime_compression" in available:
-            if "realtime_compression" not in strategy_ids:
-                strategy_ids.insert(0, "realtime_compression")
-                notes.append("Prepended realtime_compression (utilisation>95%)")
+        if ctx.utilisation > 0.95 and "realtime" in available:
+            if "realtime" not in strategy_ids:
+                strategy_ids.insert(0, "realtime")
+                notes.append("Prepended realtime (utilisation>95%)")
 
         # 4. Retrieval config
         enable_graph = ctx.task_type in ("task", "compaction") or ctx.turn_count > 10
