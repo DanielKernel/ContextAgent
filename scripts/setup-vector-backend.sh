@@ -90,20 +90,19 @@ copy_example_config() {
 }
 
 setup_pgvector_backend() {
-  local pg_root="$PROJECT_DIR/.local/postgres"
-  local pg_data_dir="$pg_root/data"
-  local pg_log_file="$pg_root/postgresql.log"
   local pg_port="${CA_PGVECTOR_PORT:-5432}"
   local pg_db_name="${CA_PGVECTOR_DB:-context_agent}"
   local pg_user="${CA_PGVECTOR_USER:-${USER:-contextagent}}"
+  local default_pg_root="$PROJECT_DIR/.local/postgres"
+  local pg_root=""
+  local pg_data_dir=""
+  local pg_log_file=""
   local pg_bin_dir=""
   local initdb_bin=""
   local pg_ctl_bin=""
   local pg_isready_bin=""
   local createdb_bin=""
   local psql_bin=""
-
-  mkdir -p "$pg_root"
 
   case "$(uname -s)" in
     Darwin)
@@ -125,12 +124,19 @@ setup_pgvector_backend() {
       pg_bin_dir="$(find_linux_pg_bin_dir)" || die "未找到 PostgreSQL 服务端二进制目录，请确认已安装 postgresql 服务端包。"
       if [[ "$(id -u)" -eq 0 ]]; then
         pg_user="${CA_PGVECTOR_USER:-postgres}"
+        default_pg_root="/var/lib/postgresql/context-agent"
       fi
       ;;
     *)
       die "当前平台暂不支持 pgvector 自动安装：$(uname -s)"
       ;;
   esac
+
+  pg_root="${CA_PGVECTOR_ROOT:-$default_pg_root}"
+  pg_data_dir="$pg_root/data"
+  pg_log_file="$pg_root/postgresql.log"
+
+  mkdir -p "$pg_root"
 
   initdb_bin="$pg_bin_dir/initdb"
   pg_ctl_bin="$pg_bin_dir/pg_ctl"
