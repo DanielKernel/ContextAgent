@@ -3,9 +3,26 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import structlog
+
+
+def _should_use_colors(stream: object | None = None) -> bool:
+    """Return True only for interactive terminals unless env overrides it."""
+    force_color = os.getenv("FORCE_COLOR")
+    if force_color and force_color != "0":
+        return True
+
+    if os.getenv("NO_COLOR") is not None:
+        return False
+
+    output_stream = stream or sys.stdout
+    is_tty = getattr(output_stream, "isatty", None)
+    if callable(is_tty):
+        return bool(is_tty())
+    return False
 
 
 def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
@@ -21,7 +38,7 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
     if json_output:
         renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer()
+        renderer = structlog.dev.ConsoleRenderer(colors=_should_use_colors(sys.stdout))
 
     structlog.configure(
         processors=[
