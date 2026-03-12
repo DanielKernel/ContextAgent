@@ -2,9 +2,11 @@
 FROM python:3.11-slim AS builder
 
 WORKDIR /app
-RUN pip install uv
-COPY pyproject.toml ./
-RUN uv sync --no-dev --extra pulsar
+COPY pyproject.toml README.md ./
+COPY context_agent/ context_agent/
+RUN python -m venv /app/.venv \
+    && /app/.venv/bin/pip install --upgrade pip setuptools wheel \
+    && /app/.venv/bin/pip install ".[pulsar,openjiuwen]"
 
 FROM python:3.11-slim AS runtime
 
@@ -15,6 +17,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 COPY --from=builder /app/.venv .venv
 COPY context_agent/ context_agent/
+COPY README.md pyproject.toml ./
 
 EXPOSE 8080
 

@@ -14,8 +14,8 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
+    "PyYAML>=6.0.0",
     "redis[hiredis]>=5.0.0",
-    "chromadb>=0.5.0",
     "structlog>=24.1.0",
     "opentelemetry-sdk>=1.25.0",
     "opentelemetry-exporter-otlp>=1.25.0",
@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openjiuwen = ["openjiuwen"]   # framework adapter (install separately from source)
+openjiuwen = ["openjiuwen"]   # framework integration
 pulsar = ["pulsar-client>=3.4.0"]
 neo4j = ["neo4j>=5.20.0"]
 milvus = ["pymilvus>=2.4.0"]
@@ -52,7 +52,7 @@ testpaths = ["tests"]
 addopts = "--strict-markers -q"
 markers = [
     "unit: unit tests (no external deps)",
-    "integration: integration tests (requires Redis/Chroma)",
+    "integration: integration tests (requires Redis/vector backend)",
     "performance: performance regression tests",
 ]
 

@@ -360,9 +360,11 @@ openjiuwen_ltm_config = {
         "batch_size": 32,
     },
     "vector_store": {
-        "backend": "qdrant",               # qdrant | pgvector | milvus
-        "collection_name": "context_agent_memory",
-        "distance": "Cosine",
+        "backend": "pgvector",            # 默认推荐；也可切换 qdrant / milvus
+        "dsn": "postgresql://postgres:password@127.0.0.1:5432/context_agent?sslmode=disable",
+        "table_name": "ltm_memory",
+        "embedding_dimension": 3072,
+        "distance": "cosine",
     },
     "memory_config": {
         "top_k": 10,
@@ -392,16 +394,13 @@ openjiuwen_ltm_config = {
 
 ### 5.1.3 向量数据库配置示例
 
-#### 本地部署 GaussDB（推荐按 pgvector 兼容方式接入）
+#### 默认推荐：pgvector
 
-对于**本地部署的华为高斯向量 DB / GaussDB(openGauss 体系)**，推荐做法是：
+ContextAgent 默认推荐通过 **openJiuwen `LongTermMemory` + `pgvector`** 接入长期记忆：
 
-1. **仍然通过 openJiuwen `LongTermMemory` 接入**
+1. **始终通过 openJiuwen `LongTermMemory` 接入**
 2. 在 openJiuwen 配置层按 **`pgvector` / PostgreSQL DSN** 风格配置
 3. 由 openJiuwen 负责连接、写入、检索、索引和向量字段管理
-
-> 说明：本示例假设你们部署的 GaussDB 提供 PostgreSQL/openGauss 兼容连接协议，并提供向量字段与向量索引能力。  
-> 如果你们使用的是特定发行版或厂商定制插件，字段名、扩展名、索引参数可能略有差异，应在 **openJiuwen 配置层** 按实际语法调整，ContextAgent 侧保持不变。
 
 推荐配置：
 
@@ -426,7 +425,7 @@ openjiuwen_ltm_config = {
     },
     "vector_store": {
         "backend": "pgvector",
-        "dsn": "postgresql://gauss_user:password@127.0.0.1:5432/context_agent?sslmode=disable",
+        "dsn": "postgresql://postgres:password@127.0.0.1:5432/context_agent?sslmode=disable",
         "table_name": "ltm_memory",
         "embedding_dimension": 3072,
         "distance": "cosine",
@@ -454,10 +453,9 @@ openjiuwen_ltm_config = {
 }
 ```
 
-#### GaussDB 建表/索引参考
+#### pgvector 建表/索引参考
 
-若你们的本地高斯向量 DB 提供 `vector(n)` 类型和 IVF/HNSW 索引能力，可参考以下结构准备底层表。  
-如果你们使用的是不同扩展名或索引语法，请替换为对应发行版语法。
+若你们使用 PostgreSQL + `pgvector`，可参考以下结构准备底层表。
 
 ```sql
 CREATE TABLE ltm_memory (
@@ -476,21 +474,20 @@ CREATE TABLE ltm_memory (
 CREATE INDEX idx_ltm_memory_scope_id ON ltm_memory(scope_id);
 CREATE INDEX idx_ltm_memory_memory_type ON ltm_memory(memory_type);
 
--- 按你们发行版支持的索引方式选择 ivfflat / hnsw
--- 下面是 pgvector 风格示例；高斯发行版若语法不同请替换
+-- 按实际场景选择 ivfflat / hnsw
 CREATE INDEX idx_ltm_memory_embedding
 ON ltm_memory
 USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 ```
 
-#### GaussDB 接入建议
+#### pgvector 接入建议
 
 - DSN 推荐显式带上 `sslmode`
 - `embedding_dimension` 必须和 embedding 模型输出维度一致
 - 至少对 `scope_id` 建普通索引，保证租户隔离过滤效率
-- 先验证高斯 DB 是否支持你们目标索引类型，再决定 `ivfflat` 或 `hnsw`
-- 如果 openJiuwen 当前只识别 `pgvector` backend，可直接把 GaussDB 当作兼容 PostgreSQL 向量库接入
+- 根据数据规模和召回延迟目标选择 `ivfflat` 或 `hnsw`
+- 若需要切换其他向量库，只调整 openJiuwen 配置即可，ContextAgent 侧不需要直连或改写数据库逻辑
 
 #### Qdrant
 
@@ -580,8 +577,8 @@ openjiuwen_ltm_config = {
 
 #### 选型建议
 
-- **开发环境**：优先 `Qdrant`，启动快、调试简单。
-- **本地部署 GaussDB / openGauss 体系**：优先按 `pgvector` 兼容方式接入，由 openJiuwen 管理 DSN 和检索。
+- **默认开发/本地环境**：优先 `pgvector`，与 ContextAgent 的本地一键安装路径一致。
+- **轻量试验环境**：可选 `Qdrant`，启动快、调试简单。
 - **通用生产环境**：优先 `pgvector`，利于与业务数据统一治理。
 - **大规模高吞吐向量场景**：优先 `Milvus`。
 
@@ -653,11 +650,11 @@ embedding_config:
   batch_size: 32
 
 vector_store:
-  backend: qdrant
-  host: 127.0.0.1
-  port: 6333
-  collection_name: context_agent_memory
-  distance: Cosine
+  backend: pgvector
+  dsn: postgresql://postgres:password@127.0.0.1:5432/context_agent?sslmode=disable
+  table_name: ltm_memory
+  embedding_dimension: 3072
+  distance: cosine
 
 memory_config:
   top_k: 10
@@ -668,7 +665,12 @@ memory_config:
   enable_summary_memory: true
 ```
 
-GaussDB 完整示例见：`examples/openjiuwen.gaussdb.yaml.example`
+默认 pgvector 示例见：`examples/openjiuwen.pgvector.yaml.example`
+
+可选后端示例：
+
+- `examples/openjiuwen.qdrant.yaml.example`
+- `examples/openjiuwen.milvus.yaml.example`
 
 ### 5.1.6 在 ContextAgent 中加载 openJiuwen 配置
 
@@ -686,6 +688,8 @@ ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
 ```
 
 若使用本项目 `Settings`，建议通过 `CA_OPENJIUWEN_CONFIG_PATH` 指向该配置文件，再在应用启动阶段统一加载。
+
+当前项目默认启动路径已经支持这一做法：只要设置 `CA_OPENJIUWEN_CONFIG_PATH`，`context_agent.api.http_handler` 就会在启动时加载 openJiuwen 配置并注入 `OpenJiuwenLTMAdapter`。
 
 ### 5.2 检索器适配器
 

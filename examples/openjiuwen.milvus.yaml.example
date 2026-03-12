@@ -1,0 +1,39 @@
+user_id: context-agent
+
+llm_config:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  timeout: 30
+  max_retries: 2
+
+embedding_config:
+  provider: openai
+  model: text-embedding-3-large
+  api_key: ${OPENAI_API_KEY}
+  base_url: https://api.openai.com/v1
+  dimension: 3072
+  batch_size: 32
+
+vector_store:
+  backend: milvus
+  uri: http://127.0.0.1:19530
+  token: ""
+  collection_name: context_agent_memory
+  embedding_dimension: 3072
+  metric_type: COSINE
+  index_type: HNSW
+  index_params:
+    M: 16
+    efConstruction: 200
+  search_params:
+    ef: 64
+
+memory_config:
+  top_k: 10
+  score_threshold: 0.3
+  enable_user_profile: true
+  enable_semantic_memory: true
+  enable_episodic_memory: true
+  enable_summary_memory: true

@@ -17,10 +17,8 @@ embedding_config:
   batch_size: 32
 
 vector_store:
-  # 对于本地部署 GaussDB / openGauss 体系，推荐通过 openJiuwen
-  # 按 pgvector 兼容方式接入，而不是让 ContextAgent 直连数据库。
   backend: pgvector
-  dsn: postgresql://gauss_user:password@127.0.0.1:5432/context_agent?sslmode=disable
+  dsn: postgresql://postgres:password@127.0.0.1:5432/context_agent?sslmode=disable
   schema: public
   table_name: ltm_memory
   embedding_dimension: 3072
@@ -43,15 +41,3 @@ memory_config:
   enable_semantic_memory: true
   enable_episodic_memory: true
   enable_summary_memory: true
-
-runtime:
-  write_batch_size: 16
-  search_timeout_ms: 300
-  healthcheck_query: "select 1"
-
-notes:
-  deployment_mode: local-gaussdb
-  guidance:
-    - Ensure the local GaussDB deployment exposes PostgreSQL/openGauss compatible access.
-    - Ensure vector type and vector index capability are installed/enabled in the database.
-    - If your GaussDB distribution uses custom extension names or index syntax, adapt them in openJiuwen, not in ContextAgent.

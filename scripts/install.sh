@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  ContextAgent 一键安装脚本
-#  用法：bash scripts/install.sh [--start] [--port PORT]
+#  用法：bash scripts/install.sh [--start] [--port PORT] [--vector-backend BACKEND]
 #
 #  选项：
 #    --start        安装完成后自动在后台启动服务（默认不启动）
 #    --port PORT    服务监听端口（默认 8000）
+#    --vector-backend BACKEND
+#                   openJiuwen 向量库后端（默认 pgvector，可选 qdrant / milvus）
+#    --openjiuwen-config PATH
+#                   openJiuwen 配置文件路径（默认 ./config/openjiuwen.yaml）
 #    --help         显示帮助
 # =============================================================================
 set -euo pipefail
@@ -15,8 +19,11 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_DIR/.venv"
 PORT=8000
 START_SERVICE=false
+VECTOR_BACKEND="pgvector"
+OPENJIUWEN_CONFIG_PATH="$PROJECT_DIR/config/openjiuwen.yaml"
 LOG_FILE="$PROJECT_DIR/context_agent.log"
 PID_FILE="$PROJECT_DIR/context_agent.pid"
+ENV_FILE="$PROJECT_DIR/.env"
 
 # ── 颜色输出 ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -31,14 +38,46 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --start)       START_SERVICE=true; shift ;;
     --port)        PORT="$2"; shift 2 ;;
+    --vector-backend) VECTOR_BACKEND="$2"; shift 2 ;;
+    --openjiuwen-config) OPENJIUWEN_CONFIG_PATH="$2"; shift 2 ;;
     --help|-h)
-      echo "用法: bash scripts/install.sh [--start] [--port PORT]"
+      echo "用法: bash scripts/install.sh [--start] [--port PORT] [--vector-backend BACKEND] [--openjiuwen-config PATH]"
       echo "  --start       安装后自动在后台启动服务"
       echo "  --port PORT   服务端口（默认 8000）"
+      echo "  --vector-backend BACKEND   向量库后端（默认 pgvector，可选 qdrant / milvus）"
+      echo "  --openjiuwen-config PATH   openJiuwen 配置文件输出路径"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac
 done
+
+upsert_env_var() {
+  local key="$1"
+  local value="$2"
+  "$PYTHON3" - "$ENV_FILE" "$key" "$value" <<'PY'
+from pathlib import Path
+import sys
+
+env_path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+lines = []
+if env_path.exists():
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+
+updated = False
+for idx, line in enumerate(lines):
+    if line.startswith(f"{key}="):
+        lines[idx] = f"{key}={value}"
+        updated = True
+        break
+
+if not updated:
+    lines.append(f"{key}={value}")
+
+env_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+PY
+}
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
@@ -99,13 +138,17 @@ info "升级 pip..."
 success "pip 升级完成"
 
 # ── 第 3 步：安装依赖 ─────────────────────────────────────────────────────────
-info "安装依赖（从 requirements.txt）..."
-"$VENV_DIR/bin/pip" install -r "$PROJECT_DIR/requirements.txt" -q --prefer-binary
-success "依赖安装完成"
-
-info "安装 ContextAgent 包..."
-"$VENV_DIR/bin/pip" install -e "$PROJECT_DIR" --no-deps -q
+info "安装 ContextAgent 及 openJiuwen 依赖..."
+"$VENV_DIR/bin/pip" install -e "$PROJECT_DIR[openjiuwen]" -q --prefer-binary
 success "ContextAgent 安装完成"
+
+# ── 第 3.5 步：准备 openJiuwen 向量库配置 ───────────────────────────────────────
+info "准备 openJiuwen 配置（向量库后端：$VECTOR_BACKEND）..."
+bash "$SCRIPT_DIR/setup-vector-backend.sh" \
+  --backend "$VECTOR_BACKEND" \
+  --config "$OPENJIUWEN_CONFIG_PATH"
+upsert_env_var "CA_OPENJIUWEN_CONFIG_PATH" "$OPENJIUWEN_CONFIG_PATH"
+success "openJiuwen 配置已就绪，已写入 .env：CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
 
 # ── 第 4 步：验证安装 ─────────────────────────────────────────────────────────
 info "验证安装..."
@@ -127,6 +170,7 @@ if $START_SERVICE; then
     rm -f "$PID_FILE"
   fi
 
+  CA_OPENJIUWEN_CONFIG_PATH="$OPENJIUWEN_CONFIG_PATH" \
   "$VENV_DIR/bin/python3" -m uvicorn context_agent.api.http_handler:app \
     --host 0.0.0.0 --port "$PORT" \
     > "$LOG_FILE" 2>&1 &
@@ -153,9 +197,11 @@ echo "║  ✅  安装成功！                            ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 echo "  手动启动服务："
-echo "    make venv-run"
+echo "    export CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
+echo "    make run-dev"
 echo "  或："
 echo "    source .venv/bin/activate"
+echo "    export CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
 echo "    python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port $PORT"
 echo ""
 echo "  接入 OpenClaw（安装服务后执行）："

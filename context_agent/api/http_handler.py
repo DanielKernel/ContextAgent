@@ -240,9 +240,9 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
 # replace this with `create_app(api_router=your_router)` in an entrypoint.
 # ---------------------------------------------------------------------------
 def _build_default_app() -> FastAPI:
-    from context_agent.orchestration.context_aggregator import ContextAggregator
+    from context_agent.config.openjiuwen import build_default_api_router
 
-    default_router = ContextAPIRouter(aggregator=ContextAggregator())
+    default_router = build_default_api_router()
     return create_app(api_router=default_router)
 
 

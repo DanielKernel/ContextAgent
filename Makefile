@@ -1,10 +1,9 @@
-.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run setup-openclaw uninstall-openclaw
+.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart setup-openclaw uninstall-openclaw
 
 PYTHON3 := python3
 VENV_DIR := .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python3
 VENV_PIP := $(VENV_DIR)/bin/pip
-UV := uv
 VERSION ?= $(shell grep '^version' pyproject.toml | head -1 | cut -d'"' -f2)
 IMAGE_NAME := context-agent:$(VERSION)
 
@@ -15,51 +14,46 @@ venv:
 	$(PYTHON3) -m venv $(VENV_DIR)
 	$(VENV_PIP) install --upgrade pip setuptools wheel
 
-## 在虚拟环境中安装项目及开发依赖（不需要 uv）
+## 在虚拟环境中安装项目及开发依赖
 venv-install: venv
-	$(VENV_PIP) install -r requirements.txt
-	$(VENV_PIP) install -e "." --no-deps
+	$(VENV_PIP) install -e ".[dev,openjiuwen]"
 
 ## 更新 requirements.txt 快照（venv-install 完成后运行）
 venv-freeze:
 	$(VENV_PIP) freeze > requirements.txt
 
-## 在虚拟环境中运行单元测试（不需要 uv）
-venv-test:
+## 在虚拟环境中运行单元测试
+venv-test: venv-install
 	$(VENV_PYTHON) -m pytest tests/unit/ -v --cov=context_agent --cov-report=term-missing -m "not integration and not performance"
 
-## 在虚拟环境中启动开发服务（不需要 uv）
-venv-run:
+## 在虚拟环境中启动开发服务
+venv-run: venv-install
 	$(VENV_PYTHON) -m uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
 
-# ── uv（推荐，自动管理 .venv）────────────────────────────────────────────────
+## 默认安装命令
+install: venv-install
 
-## 使用 uv 安装所有依赖（自动创建 .venv）
-install:
-	$(UV) sync --extra dev
+lint: venv-install
+	$(VENV_PYTHON) -m ruff check context_agent/ tests/
+	$(VENV_PYTHON) -m ruff format --check context_agent/ tests/
 
-lint:
-	$(UV) run ruff check context_agent/ tests/
-	$(UV) run ruff format --check context_agent/ tests/
+format: venv-install
+	$(VENV_PYTHON) -m ruff check --fix context_agent/ tests/
+	$(VENV_PYTHON) -m ruff format context_agent/ tests/
 
-format:
-	$(UV) run ruff check --fix context_agent/ tests/
-	$(UV) run ruff format context_agent/ tests/
+type-check: venv-install
+	$(VENV_PYTHON) -m mypy context_agent/
 
-type-check:
-	$(UV) run mypy context_agent/
+test: venv-test
 
-test:
-	$(UV) run pytest tests/unit/ -v --cov=context_agent --cov-report=term-missing -m "not integration and not performance"
+test-int: venv-install
+	$(VENV_PYTHON) -m pytest tests/integration/ -v -m integration
 
-test-int:
-	$(UV) run pytest tests/integration/ -v -m integration
+test-perf: venv-install
+	$(VENV_PYTHON) -m pytest tests/performance/ -v --benchmark-only -m performance
 
-test-perf:
-	$(UV) run pytest tests/performance/ -v --benchmark-only -m performance
-
-test-all:
-	$(UV) run pytest tests/ -v --cov=context_agent --cov-report=term-missing --cov-report=html
+test-all: venv-install
+	$(VENV_PYTHON) -m pytest tests/ -v --cov=context_agent --cov-report=term-missing --cov-report=html
 
 build:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(IMAGE_NAME) .
@@ -72,8 +66,7 @@ clean:
 clean-venv: clean
 	rm -rf $(VENV_DIR)
 
-run-dev:
-	$(UV) run uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
+run-dev: venv-run
 
 # ── 一键脚本 ─────────────────────────────────────────────────────────────────
 

@@ -879,7 +879,7 @@ flowchart TD
 
 > P1. 业务 Agent 调用 `hybrid_search`，携带 `query`、`retrieval_plan`（含启用的检索方式列表和各路权重）和 `top_k`
 > P2. `UnifiedSearchCoordinator` 解析 `retrieval_plan`，并行启动各路检索：
-> &nbsp;&nbsp;&nbsp;`VECTOR` → 调用 openJiuwen `HybridRetriever`（向量部分，Chroma/Milvus/PG）
+> &nbsp;&nbsp;&nbsp;`VECTOR` → 调用 openJiuwen `HybridRetriever`（向量部分，pgvector/Milvus/Qdrant 等）
 > &nbsp;&nbsp;&nbsp;`SPARSE` → 调用 openJiuwen `HybridRetriever`（稀疏部分，关键词/BM25）
 > &nbsp;&nbsp;&nbsp;`GRAPH` → 调用 openJiuwen `GraphRetriever`（图关系遍历）
 > &nbsp;&nbsp;&nbsp;`MEMORY` → 调用 openJiuwen `LongTermMemory.search_user_mem`（记忆语义检索）
@@ -1389,4 +1389,3 @@ flowchart TD
   | `MonitoringCollector` | 指标写入 | 断言指标采集正确性 |
   | `AlertEngine` | 告警触发 | 测试告警阈值逻辑 |
   | 时钟（`datetime.now`） | 注入 mock 时钟 | 测试超时、TTL、滑动窗口逻辑 |
-

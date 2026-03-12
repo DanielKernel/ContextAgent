@@ -30,13 +30,6 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     redis_pool_max_connections: int = 50
 
-    # ── Vector DB ────────────────────────────────────────────────────────────
-    chroma_host: str = "localhost"
-    chroma_port: int = 8000
-    chroma_collection: str = "context_agent"
-    # Milvus (production override)
-    milvus_uri: str = ""
-
     # ── Object storage (version snapshots) ──────────────────────────────────
     s3_endpoint_url: str = ""
     s3_bucket: str = "context-agent-versions"
@@ -50,7 +43,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2
 
     # ── openJiuwen ───────────────────────────────────────────────────────────
-    openjiuwen_config_path: str = ""  # path to openjiuwen config file
+    openjiuwen_config_path: str = ""  # openJiuwen config file owns vector DB details
 
     # ── Latency budgets (ms) ─────────────────────────────────────────────────
     hot_tier_timeout_ms: float = Field(default=20.0, ge=1.0, le=200.0)
