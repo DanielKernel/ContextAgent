@@ -1,4 +1,4 @@
-.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart setup-openclaw uninstall-openclaw
+.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart upgrade setup-openclaw uninstall-openclaw
 
 PYTHON3 := python3
 VENV_DIR := .venv
@@ -73,6 +73,10 @@ run-dev: venv-run
 ## 一键安装 ContextAgent 并启动服务
 quickstart:
 	bash scripts/install.sh --start
+
+## 一键升级 ContextAgent（保留历史配置和数据）
+upgrade:
+	bash scripts/upgrade.sh
 
 ## 一键对接 OpenClaw（ContextAgent 服务需已启动）
 setup-openclaw:

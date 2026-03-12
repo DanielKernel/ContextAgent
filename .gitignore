@@ -34,6 +34,7 @@ uv.lock
 htmlcov/
 .pytest_cache/
 .benchmarks/
+.local/
 
 # Type checking
 .mypy_cache/

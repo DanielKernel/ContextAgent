@@ -1331,6 +1331,50 @@ async def check_and_compact(snapshot, token_budget: int = 4096) -> ContextOutput
 - JIT 解析结果缓存 60 秒（`JIT_RESULT_CACHE_TTL_S`）
 - 对同一 ref 的重复解析自动命中本地缓存，Redis 不可用时降级为进程内字典
 
+### 一键升级与历史数据保护
+
+推荐升级入口：
+
+```bash
+# 先更新代码，再执行升级
+bash scripts/upgrade.sh
+```
+
+升级脚本默认行为：
+
+1. 识别当前正式配置路径（`config/context_agent.yaml`、`config/openjiuwen.yaml` 或环境变量覆盖路径）
+2. 备份配置文件和 `.env`
+3. 若当前后端是 `pgvector`，在可用时执行一次 `pg_dump` 逻辑备份
+4. 升级 `.venv` 中的依赖到当前代码版本
+5. 对正式配置执行**只补缺省字段**的非破坏性迁移
+6. 对 pgvector 执行 `CREATE ... IF NOT EXISTS` / `ALTER ... ADD COLUMN IF NOT EXISTS` 形式的幂等 schema 迁移
+7. 若升级前服务在运行，则自动重启并校验 `/health`
+
+数据保护原则：
+
+- 不重新 `initdb`
+- 不删除 PostgreSQL 数据目录
+- 不覆盖已有 `config/*.yaml` 值
+- 不在默认升级流程中执行 destructive DDL
+
+常用命令：
+
+```bash
+# 强制升级后启动服务
+bash scripts/upgrade.sh --start
+
+# 仅升级应用和配置，跳过数据库逻辑备份
+bash scripts/upgrade.sh --skip-db-backup
+
+# 从某次升级备份还原配置
+bash scripts/upgrade.sh --rollback .local/upgrade-backups/<timestamp>
+```
+
+说明：
+
+- `--rollback` 默认回滚配置与 `.env`；数据库逻辑备份会保留，但不会在默认路径下自动导回，以避免误覆盖新增数据。
+- 如果你们使用的是 qdrant / milvus，升级流程仍会保留正式配置并做非破坏性补齐，但数据库备份/迁移需遵循各自后端的运维方式。
+
 ---
 
 ## 12. 故障排查

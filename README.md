@@ -31,6 +31,7 @@ bash scripts/setup-openclaw.sh
 > **更多选项：**
 > ```bash
 > bash scripts/install.sh --help
+> bash scripts/upgrade.sh --help
 > bash scripts/setup-openclaw.sh --help
 > ```
 
@@ -60,6 +61,7 @@ source .venv/bin/activate
 ```bash
 make install        # 等价于：创建 .venv + pip install -e ".[dev,openjiuwen]"
 make run-dev        # 等价于：.venv/bin/python3 -m uvicorn ...
+make upgrade        # 等价于：bash scripts/upgrade.sh
 make venv-test      # 在 .venv 中运行测试
 ```
 
@@ -91,6 +93,40 @@ bash scripts/install.sh --vector-backend milvus
 - `examples/configs/qdrant/openjiuwen.yaml`
 - `examples/configs/milvus/context_agent.yaml`
 - `examples/configs/milvus/openjiuwen.yaml`
+
+### 一键升级且保留历史数据
+
+升级入口：
+
+```bash
+# 先更新代码，再执行升级
+bash scripts/upgrade.sh
+```
+
+升级脚本默认会：
+
+1. 备份 `config/context_agent.yaml`、`config/openjiuwen.yaml`、`.env`
+2. 对 `pgvector` 执行逻辑备份（若能找到 `pg_dump`）
+3. 保留 PostgreSQL 数据目录和 `ltm_memory` 历史记忆
+4. 只做幂等配置补齐和非破坏性 schema 迁移
+5. 若服务原本在运行，则升级后自动重启并做 `/health` 校验
+
+常用命令：
+
+```bash
+# 强制升级后启动服务
+bash scripts/upgrade.sh --start
+
+# 从某次升级备份还原配置
+bash scripts/upgrade.sh --rollback .local/upgrade-backups/<timestamp>
+```
+
+说明：
+
+- 升级流程不会重新 `initdb`
+- 不会删除 `.local/postgres` 或 `/var/lib/postgresql/context-agent`
+- 不会在默认流程中执行 destructive DDL
+- 若升级后的健康检查失败，脚本会先回滚配置，再尝试恢复服务
 
 ### 5 行接入
 
