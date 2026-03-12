@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -75,6 +76,11 @@ def _estimate_tokens(messages: list[AgentMessage]) -> int:
     return sum(len(m.content) // 4 for m in messages)
 
 
+def _supports_ingest(api_router: Any) -> bool:
+    ingest_messages = getattr(api_router, "ingest_messages", None)
+    return inspect.iscoroutinefunction(ingest_messages)
+
+
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 
 
@@ -89,13 +95,24 @@ async def bootstrap(req: BootstrapRequest, request: Request) -> BootstrapRespons
         return BootstrapResponse(status="ok", items_loaded=0)
 
     items = _messages_to_items(req.messages, req.scope_id, req.session_id)
-    if api_router._working_memory is not None and items:
-        for item in items:
-            await api_router._working_memory.write(
+    if items:
+        if _supports_ingest(api_router):
+            await api_router.ingest_messages(
                 scope_id=req.scope_id,
                 session_id=req.session_id,
-                item=item,
+                messages=[
+                    {"role": item.metadata.get("role", item.source_type), "content": item.content.split("] ", 1)[-1], "metadata": item.metadata}
+                    for item in items
+                ],
+                persist_long_term=False,
             )
+        elif api_router._working_memory is not None:
+            for item in items:
+                await api_router._working_memory.write(
+                    scope_id=req.scope_id,
+                    session_id=req.session_id,
+                    item=item,
+                )
 
     logger.info(
         "openclaw.bootstrap completed",
@@ -119,8 +136,17 @@ async def ingest(req: IngestRequest, request: Request) -> IngestResponse:
         return IngestResponse(status="ok", ingested_count=0)
 
     items = _messages_to_items(req.messages, req.scope_id, req.session_id)
-    ingested = 0
-    if api_router._working_memory is not None:
+    if _supports_ingest(api_router):
+        ingested = await api_router.ingest_messages(
+            scope_id=req.scope_id,
+            session_id=req.session_id,
+            messages=[
+                {"role": item.metadata.get("role", item.source_type), "content": item.content.split("] ", 1)[-1], "metadata": item.metadata}
+                for item in items
+            ],
+        )
+    elif api_router._working_memory is not None:
+        ingested = 0
         for item in items:
             await api_router._working_memory.write(
                 scope_id=req.scope_id,
@@ -331,22 +357,35 @@ async def after_turn(req: AfterTurnRequest, request: Request) -> AfterTurnRespon
         )
 
     # 2. Persist the assistant reply as a working memory item
-    if api_router._working_memory is not None and req.assistant_message.content.strip():
-        item = ContextItem(
-            item_id=uuid.uuid4().hex,
-            scope_id=req.scope_id,
-            session_id=req.session_id,
-            content=f"[assistant] {req.assistant_message.content}",
-            source_type="assistant",
-            memory_type=MemoryType.VARIABLE,
-            level=ContextLevel.DETAIL,
-            metadata={"role": "assistant"},
-        )
-        await api_router._working_memory.write(
-            scope_id=req.scope_id,
-            session_id=req.session_id,
-            item=item,
-        )
+    if req.assistant_message.content.strip():
+        if _supports_ingest(api_router):
+            await api_router.ingest_messages(
+                scope_id=req.scope_id,
+                session_id=req.session_id,
+                messages=[
+                    {
+                        "role": "assistant",
+                        "content": req.assistant_message.content,
+                        "metadata": {"role": "assistant", **req.assistant_message.metadata},
+                    }
+                ],
+            )
+        elif api_router._working_memory is not None:
+            item = ContextItem(
+                item_id=uuid.uuid4().hex,
+                scope_id=req.scope_id,
+                session_id=req.session_id,
+                content=f"[assistant] {req.assistant_message.content}",
+                source_type="assistant",
+                memory_type=MemoryType.VARIABLE,
+                level=ContextLevel.DETAIL,
+                metadata={"role": "assistant"},
+            )
+            await api_router._working_memory.write(
+                scope_id=req.scope_id,
+                session_id=req.session_id,
+                item=item,
+            )
 
     logger.info(
         "openclaw.after_turn completed",

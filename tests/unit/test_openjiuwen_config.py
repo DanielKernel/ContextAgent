@@ -46,6 +46,8 @@ def test_build_default_api_router_without_openjiuwen_config():
 
     assert isinstance(router, ContextAPIRouter)
     assert router._aggregator._ltm is None
+    assert router._working_memory is not None
+    assert router._memory_orchestrator is None
 
 
 def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path):
@@ -63,3 +65,6 @@ def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path)
     )
 
     assert router._aggregator._ltm is sentinel_adapter
+    assert router._working_memory is not None
+    assert router._memory_orchestrator is not None
+    assert router._memory_processor is not None

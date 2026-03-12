@@ -46,6 +46,8 @@ class ContextAPIRouter:
         version_manager: ContextVersionManager | None = None,
         scheduler: HybridStrategyScheduler | None = None,
         working_memory: Any | None = None,
+        memory_orchestrator: Any | None = None,
+        memory_processor: Any | None = None,
         tiered_router: Any | None = None,
         tool_governor: Any | None = None,
     ) -> None:
@@ -56,6 +58,8 @@ class ContextAPIRouter:
         self._vm = version_manager or ContextVersionManager()
         self._scheduler = scheduler or HybridStrategyScheduler()
         self._working_memory = working_memory
+        self._memory_orchestrator = memory_orchestrator
+        self._memory_processor = memory_processor
         self._tiered_router = tiered_router
         self._tool_governor = tool_governor
 
@@ -208,3 +212,48 @@ class ContextAPIRouter:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )
+
+    async def ingest_messages(
+        self,
+        scope_id: str,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        user_id: str = "",
+        persist_long_term: bool = True,
+    ) -> int:
+        """Persist conversation messages into working memory and openJiuwen LTM."""
+        if self._memory_orchestrator is not None:
+            return await self._memory_orchestrator.ingest_messages(
+                scope_id=scope_id,
+                session_id=session_id,
+                messages=messages,
+                user_id=user_id,
+                persist_long_term=persist_long_term,
+            )
+
+        if self._working_memory is None:
+            return 0
+
+        from context_agent.models.context import ContextItem, MemoryType
+
+        count = 0
+        for message in messages:
+            content = str(message.get("content", "")).strip()
+            role = str(message.get("role", "user")).strip() or "user"
+            if not content:
+                continue
+            await self._working_memory.write(
+                scope_id=scope_id,
+                session_id=session_id,
+                item=ContextItem(
+                    scope_id=scope_id,
+                    session_id=session_id,
+                    source_type=role,
+                    memory_type=MemoryType.VARIABLE,
+                    content=f"[{role}] {content}",
+                    metadata={**message.get("metadata", {}), "role": role},
+                ),
+            )
+            count += 1
+        return count

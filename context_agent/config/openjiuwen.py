@@ -11,6 +11,9 @@ import yaml
 from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.settings import Settings, get_settings
+from context_agent.core.memory.async_processor import AsyncMemoryProcessor
+from context_agent.core.memory.orchestrator import MemoryOrchestrator
+from context_agent.core.memory.working_memory import WorkingMemoryManager
 from context_agent.orchestration.context_aggregator import ContextAggregator
 from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
@@ -89,15 +92,29 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     """Build the default API router, wiring openJiuwen LTM when configured."""
     runtime_settings = settings or get_settings()
     aggregator_kwargs: dict[str, Any] = {}
+    router_kwargs: dict[str, Any] = {}
+    working_memory = WorkingMemoryManager()
+    aggregator_kwargs["working_memory"] = working_memory
+    router_kwargs["working_memory"] = working_memory
 
     if runtime_settings.openjiuwen_config_path:
-        aggregator_kwargs["ltm"] = build_openjiuwen_ltm_adapter(
+        ltm_adapter = build_openjiuwen_ltm_adapter(
             runtime_settings.openjiuwen_config_path
         )
+        memory_processor = AsyncMemoryProcessor(ltm=ltm_adapter)
+        router_kwargs["memory_processor"] = memory_processor
+        router_kwargs["memory_orchestrator"] = MemoryOrchestrator(
+            working_memory=working_memory,
+            async_processor=memory_processor,
+        )
+        aggregator_kwargs["ltm"] = ltm_adapter
     else:
         logger.info(
             "starting without openJiuwen long-term memory",
             reason="CA_OPENJIUWEN_CONFIG_PATH is not set",
         )
 
-    return ContextAPIRouter(aggregator=ContextAggregator(**aggregator_kwargs))
+    return ContextAPIRouter(
+        aggregator=ContextAggregator(**aggregator_kwargs),
+        **router_kwargs,
+    )

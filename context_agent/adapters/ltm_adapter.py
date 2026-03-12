@@ -86,11 +86,14 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         filters: dict[str, Any] | None = None,
     ) -> list[ContextItem]:
         try:
+            merged_filters = dict(filters or {})
+            if memory_types:
+                merged_filters["memory_type"] = [memory_type.value for memory_type in memory_types]
             results = await self._ltm.search_user_mem(
                 query=query,
                 user_id=scope_id,
                 limit=top_k,
-                filters=filters or {},
+                filters=merged_filters,
             )
             items = []
             for r in results:

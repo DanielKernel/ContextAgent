@@ -13,6 +13,7 @@ from typing import Any
 import redis.asyncio as aioredis
 
 from context_agent.config.defaults import MAX_NOTES_PER_SESSION
+from context_agent.models.context import ContextItem, MemoryType
 from context_agent.models.note import NOTE_CONTENT_SCHEMAS, NoteType, WorkingNote
 from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
@@ -30,9 +31,13 @@ class WorkingMemoryManager:
     def __init__(self, redis_client: aioredis.Redis | None = None) -> None:
         self._redis = redis_client
         self._local: dict[str, dict[str, str]] = {}  # {hash_key: {note_id: json}}
+        self._local_items: dict[str, dict[str, str]] = {}  # {items_key: {item_id: json}}
 
     def _hash_key(self, scope_id: str, session_id: str) -> str:
         return f"ca:wm:{scope_id}:{session_id}"
+
+    def _items_key(self, scope_id: str, session_id: str) -> str:
+        return f"ca:wm-items:{scope_id}:{session_id}"
 
     async def create_note(self, note: WorkingNote) -> WorkingNote:
         """Persist a new working note. Validates content against schema."""
@@ -141,26 +146,101 @@ class WorkingMemoryManager:
     async def clear_session(self, scope_id: str, session_id: str) -> None:
         """Remove all notes for a session (called on session end)."""
         key = self._hash_key(scope_id, session_id)
+        items_key = self._items_key(scope_id, session_id)
         try:
             if self._redis is not None:
                 await self._redis.delete(key)
+                await self._redis.delete(items_key)
             else:
                 self._local.pop(key, None)
+                self._local_items.pop(items_key, None)
         except Exception as exc:
             logger.warning("clear_session failed", scope_id=scope_id, error=str(exc))
 
+    async def write(self, scope_id: str, session_id: str, item: ContextItem) -> ContextItem:
+        """Persist a working-memory ContextItem for the current session."""
+        key = self._items_key(scope_id, session_id)
+        serialized = item.model_dump_json()
+        try:
+            if self._redis is not None:
+                await self._redis.hset(key, item.item_id, serialized)
+            else:
+                self._local_items.setdefault(key, {})[item.item_id] = serialized
+        except Exception as exc:
+            logger.warning("working memory item write failed", error=str(exc), item_id=item.item_id)
+        return item
+
+    async def list_items(self, scope_id: str, session_id: str) -> list[ContextItem]:
+        """List session-scoped working-memory ContextItems."""
+        key = self._items_key(scope_id, session_id)
+        try:
+            if self._redis is not None:
+                raw_map: dict[Any, Any] = await self._redis.hgetall(key)
+            else:
+                raw_map = self._local_items.get(key, {})
+            return [
+                ContextItem.model_validate_json(raw)
+                for raw in raw_map.values()
+            ]
+        except Exception as exc:
+            logger.warning("list_items failed", scope_id=scope_id, error=str(exc))
+            return []
+
     async def to_context_items(
         self, scope_id: str, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Serialize notes as injectable message dicts for context injection."""
+    ) -> list[ContextItem]:
+        """Return working-memory items and notes as injectable ContextItems."""
+        items = await self.list_items(scope_id, session_id)
         notes = await self.list_notes(scope_id, session_id)
-        items = []
         for note in notes:
             items.append({
-                "role": "system",
+                "item_id": note.note_id,
+                "scope_id": scope_id,
+                "session_id": session_id,
+                "source_type": "working_note",
+                "tier": "hot",
+                "memory_type": MemoryType.VARIABLE,
                 "content": f"[{note.note_type.value.upper()}]\n{json.dumps(note.content, ensure_ascii=False)}",
+                "metadata": {"note_type": note.note_type.value, "tags": note.tags},
+                "updated_at": note.updated_at,
             })
-        return items
+        return [
+            item if isinstance(item, ContextItem) else ContextItem(**item)
+            for item in items
+        ]
+ 
+    async def mark_used(
+        self, scope_id: str, session_id: str, item_ids: list[str]
+    ) -> int:
+        """Increment active_count on working-memory items matching item_ids.
+
+        This feeds the Hotness Score: items confirmed as useful by callers rank
+        higher in future retrievals.
+
+        Returns the number of records actually updated.
+        """
+        if not item_ids:
+            return 0
+        id_set = set(item_ids)
+        updated = 0
+
+        items = await self.list_items(scope_id, session_id)
+        for item in items:
+            if item.item_id in id_set:
+                item.active_count += 1
+                item.updated_at = datetime.utcnow()
+                await self.write(scope_id, session_id, item)
+                updated += 1
+
+        notes = await self.list_notes(scope_id, session_id)
+        for note in notes:
+            if note.note_id in id_set:
+                active = note.content.get("_active_count", 0) + 1
+                await self.update_note(
+                    scope_id, note.session_id, note.note_id, {"_active_count": active}
+                )
+                updated += 1
+        return updated
 
     @staticmethod
     async def _validate_content(note_type: NoteType, content: dict[str, Any]) -> None:
@@ -170,27 +250,3 @@ class WorkingMemoryManager:
         missing = [k for k in schema if k not in content]
         if missing:
             logger.debug("note content missing optional fields", missing=missing, note_type=note_type)
-
-    async def mark_used(
-        self, scope_id: str, session_id: str, item_ids: list[str]
-    ) -> int:
-        """Increment active_count on working-memory items matching item_ids.
-
-        This feeds the Hotness Score: items confirmed as useful by callers rank
-        higher in future retrievals.
-
-        Returns the number of notes actually updated.
-        """
-        if not item_ids:
-            return 0
-        id_set = set(item_ids)
-        notes = await self.list_notes(scope_id, session_id)
-        updated = 0
-        for note in notes:
-            if note.note_id in id_set:
-                active = note.content.get("_active_count", 0) + 1
-                await self.update_note(
-                    scope_id, note.session_id, note.note_id, {"_active_count": active}
-                )
-                updated += 1
-        return updated

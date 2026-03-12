@@ -47,7 +47,11 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("ContextAgent HTTP service starting", version="0.1.0")
+        if api_router is not None and getattr(api_router, "_memory_processor", None) is not None:
+            await api_router._memory_processor.start()
         yield
+        if api_router is not None and getattr(api_router, "_memory_processor", None) is not None:
+            await api_router._memory_processor.stop()
         logger.info("ContextAgent HTTP service shutting down")
 
     app = FastAPI(
@@ -120,16 +124,29 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         )
 
     @app.post("/context/write", response_model=WriteResponse, tags=["context"], dependencies=[RequireAuth])
-    async def write_context(req: WriteRequest) -> WriteResponse:
-        """Stub: accepts context writes; real implementation integrates AsyncMemoryProcessor."""
+    async def write_context(req: WriteRequest, request: Request) -> WriteResponse:
+        """Persist memory through working memory and openJiuwen-managed long-term memory."""
+        router: ContextAPIRouter | None = request.app.state.api_router
+        if router is None:
+            raise HTTPException(status_code=503, detail="Service not initialised")
         item_id = uuid.uuid4().hex
-        logger.info(
-            "context write accepted",
+        persisted = await router.ingest_messages(
             scope_id=req.scope_id,
-            item_id=item_id,
-            source_type=req.source_type,
+            session_id=req.session_id,
+            messages=[
+                {
+                    "role": req.source_type,
+                    "content": req.content,
+                    "metadata": {
+                        **req.metadata,
+                        "requested_memory_type": req.memory_type,
+                        "request_item_id": item_id,
+                    },
+                }
+            ],
         )
-        return WriteResponse(item_id=item_id, status="accepted")
+        status = "accepted" if persisted else "ignored"
+        return WriteResponse(item_id=item_id, status=status)
 
     @app.get(
         "/context/{scope_id}/versions",

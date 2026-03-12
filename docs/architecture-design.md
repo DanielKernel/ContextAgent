@@ -22,6 +22,12 @@
 
 ContextAgent 是多 Agent 系统中的**上下文管理中枢**，作为 openJiuwen 生态中的专用 Agent，向上层业务 Agent 提供统一的上下文聚合、记忆管理、压缩摘要和检索能力，屏蔽底层存储异构性。
 
+当前实现进一步明确为“**openJiuwen 负责长期记忆底座，ContextAgent 负责记忆编排与注入治理**”：
+
+- 长期记忆落库、检索、更新仍通过 openJiuwen `LongTermMemory`
+- ContextAgent 新增 `MemoryOrchestrator`，在 working memory 与长期记忆之间做写入策略编排
+- 默认长期记忆后端为 `pgvector`，但只存在于 openJiuwen 配置中，而不是业务代码中
+
 #### 系统边界
 
 - **系统内**：上下文聚合（UC001）、分层记忆管理（UC002）、动态上下文更新（UC003）、JIT 检索（UC004）、混合召回（UC005）、暴露控制（UC006）、Agent 上下文接口（UC007）、记忆异步处理（UC008）、压缩与摘要（UC009）、结构化工作记忆（UC010）、工具治理（UC011）、混合检索（UC012）、版本管理（UC013）、子代理隔离（UC014）、多模态扩展（UC015）、监控（UC016）

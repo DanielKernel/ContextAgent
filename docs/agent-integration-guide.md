@@ -691,6 +691,66 @@ ltm_adapter = OpenJiuwenLTMAdapter(ltm=ltm)
 
 当前项目默认启动路径已经支持这一做法：只要设置 `CA_OPENJIUWEN_CONFIG_PATH`，`context_agent.api.http_handler` 就会在启动时加载 openJiuwen 配置并注入 `OpenJiuwenLTMAdapter`。
 
+### 5.1.7 默认记忆编排链路
+
+当前默认装配不是只把 openJiuwen 当成“一个可搜索的向量库”，而是把它作为**长期记忆底座**：
+
+```text
+HTTP/OpenClaw ingest
+    -> MemoryOrchestrator
+    -> WorkingMemoryManager
+    -> AsyncMemoryProcessor
+    -> OpenJiuwenLTMAdapter
+    -> openJiuwen LongTermMemory
+    -> pgvector（默认）/ qdrant / milvus
+```
+
+关键点：
+
+1. **Working memory** 保存当前 session 的即时对话与结构化 note。
+2. **MemoryOrchestrator** 负责把消息分类成 `procedural / semantic / episodic / variable`。
+3. **AsyncMemoryProcessor** 负责异步写入、复用 openJiuwen 侧的去重/冲突检查能力。
+4. **向量数据库实现仍不出现在 ContextAgent 业务代码里**，全部通过 openJiuwen 配置切换。
+
+默认分类策略如下：
+
+| 场景 | MemoryType | Category | 默认去向 |
+|------|------------|----------|----------|
+| 用户格式/语言/风格偏好 | `procedural` | `preferences` | working memory + openJiuwen LTM |
+| 稳定身份/事实 | `semantic` | `profile` | working memory + openJiuwen LTM |
+| 阶段决定、任务结论、完成状态 | `episodic` | `events` | working memory + openJiuwen LTM |
+| 普通轮次消息 | `variable` | `events` | 仅 working memory |
+
+如果调用方显式指定 `memory_type`，ContextAgent 会优先采用显式类型，再交给 openJiuwen 执行长期记忆写入。
+
+### 5.1.8 写入接口示例
+
+除了 `/context` 检索接口，也可以通过 `/context/write` 主动写入记忆：
+
+```bash
+curl -X POST http://localhost:8080/context/write \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "scope_id": "user:uid-123",
+    "session_id": "sess-001",
+    "content": "以后请默认使用中文回答，并用简洁格式输出。",
+    "source_type": "user",
+    "memory_type": "procedural",
+    "metadata": {
+      "source": "manual-write"
+    }
+  }'
+```
+
+这个接口会：
+
+- 先把内容写入 `WorkingMemoryManager`
+- 再通过 `MemoryOrchestrator` 决定是否进入长期记忆
+- 若需要长期保留，则异步提交到 openJiuwen `LongTermMemory.add_messages()`
+
+因此 `/context/write` 依然遵守同一条边界：**ContextAgent 不直接写 pgvector，而是写 openJiuwen。**
+
 ### 5.2 检索器适配器
 
 ```python

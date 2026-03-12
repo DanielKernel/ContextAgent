@@ -139,6 +139,7 @@ OpenClaw attempt.ts
 │
 ├── [hadSessionFile=true]  → bootstrap()
 │     ContextAgent: 从 messages 构建 ContextItem，写入 working memory
+│                   仅恢复会话态，不重复写入长期记忆
 │
 ├── sanitize / validate / limit  （OpenClaw 原生，不经过 ContextAgent）
 │
@@ -151,7 +152,8 @@ OpenClaw attempt.ts
 │
 ├── afterTurn()            ← 每轮必调（ContextAgent 优先于 ingestBatch fallback）
 │     ContextAgent: mark_used(用到的上下文 IDs) → active_count+1
-│                   持久化 assistant reply 到 working memory
+│                   assistant reply 进入 working memory
+│                   若命中偏好 / 事实 / 阶段结论规则，则异步写入 openJiuwen LTM
 │
 └── [token overflow]       → compact()
       ContextAgent: CompressionStrategyRouter → 压缩后的 messages
@@ -182,6 +184,27 @@ mark_used() → active_count += 1（被用到的片段热度上升）
            ↓
 下次 assemble() → Hotness Score 权重更高 → 热点记忆优先召回
 ```
+
+### 4.4 记忆写入策略
+
+当前默认策略参考 Anthropic / OpenAI / OpenClaw 的常见做法，采用“**先写 working memory，再选择性异步沉淀长期记忆**”：
+
+- 所有新消息先进入 session 级 working memory，保证当前会话可立即召回
+- 明确的**用户偏好**（如语言、格式、风格约束）会标记为 `procedural + preferences`
+- 稳定的**用户画像 / 事实**会标记为 `semantic + profile`
+- 阶段性**决定 / 结论 / 完成状态**会标记为 `episodic + events`
+- 长期记忆写入统一交给 `AsyncMemoryProcessor -> OpenJiuwenLTMAdapter -> openJiuwen LongTermMemory`
+
+这条链路里，ContextAgent 只负责分类和治理；真正的向量写入仍由 openJiuwen 根据配置完成，默认向量后端为 `pgvector`。
+
+### 4.5 默认部署边界
+
+若启用了 `CA_OPENJIUWEN_CONFIG_PATH`：
+
+- ContextAgent 启动时会装配 `WorkingMemoryManager`
+- 同时创建 `MemoryOrchestrator` 与 `AsyncMemoryProcessor`
+- 长期记忆后端仍只从 openJiuwen 配置文件读取
+- 默认示例配置为 `pgvector`，但 OpenClaw 接入方式本身不绑定具体向量库
 
 ---
 
