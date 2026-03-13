@@ -8,6 +8,10 @@ TIMEOUT_SECONDS="${CA_HEALTH_TIMEOUT:-5}"
 STRICT_SKIPPED=false
 HEALTH_URL="${CA_HEALTH_URL:-}"
 ALLOW_DEGRADED_COMPONENTS="${CA_HEALTH_ALLOW_DEGRADED_COMPONENTS:-}"
+EXPLICIT_URL=false
+if [[ -n "$HEALTH_URL" ]]; then
+  EXPLICIT_URL=true
+fi
 
 usage() {
   cat <<'EOF'
@@ -29,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --url)
       [[ $# -ge 2 ]] || die "--url 需要一个参数"
       HEALTH_URL="$2"
+      EXPLICIT_URL=true
       shift 2
       ;;
     --timeout)
@@ -67,9 +72,29 @@ fi
 
 info "执行健康检查：$HEALTH_URL"
 
-HEALTH_BODY="$(
-  curl -fsS --max-time "$TIMEOUT_SECONDS" "$HEALTH_URL"
-)" || die "健康检查请求失败：$HEALTH_URL"
+fetch_health() {
+  curl -fsS --max-time "$TIMEOUT_SECONDS" "$1" 2>/dev/null
+}
+
+if ! HEALTH_BODY="$(fetch_health "$HEALTH_URL")"; then
+  if [[ "$EXPLICIT_URL" != true ]]; then
+    DISCOVERED_PORT="$(find_any_contextagent_listener_port || true)"
+    if [[ -n "$DISCOVERED_PORT" ]]; then
+      DISCOVERED_URL="http://127.0.0.1:${DISCOVERED_PORT}/health"
+      if [[ "$DISCOVERED_URL" != "$HEALTH_URL" ]]; then
+        warn "默认健康检查地址不可达，检测到 ContextAgent 正在监听端口 ${DISCOVERED_PORT}，改用 ${DISCOVERED_URL}"
+        HEALTH_URL="$DISCOVERED_URL"
+        HEALTH_BODY="$(fetch_health "$HEALTH_URL")" || die "健康检查请求失败：$HEALTH_URL"
+      else
+        die "健康检查请求失败：$HEALTH_URL"
+      fi
+    else
+      die "健康检查请求失败：$HEALTH_URL"
+    fi
+  else
+    die "健康检查请求失败：$HEALTH_URL"
+  fi
+fi
 
 CHECK_OUTPUT="$(
   HEALTH_JSON="$HEALTH_BODY" \

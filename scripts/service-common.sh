@@ -179,6 +179,51 @@ find_contextagent_listener_pid() {
   return 1
 }
 
+listening_port_for_pid() {
+  local pid="$1"
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -nP -a -p "$pid" -iTCP -sTCP:LISTEN -F n 2>/dev/null | awk '
+    /^n/ {
+      sub(/^n/, "", $0)
+      split($0, parts, ":")
+      port = parts[length(parts)]
+      if (port ~ /^[0-9]+$/) {
+        print port
+        exit
+      }
+    }
+  '
+}
+
+find_any_contextagent_listener_port() {
+  local pid port
+
+  if [[ -f "$PID_FILE" ]]; then
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && is_contextagent_pid "$pid"; then
+      port="$(listening_port_for_pid "$pid" || true)"
+      if [[ -n "$port" ]]; then
+        echo "$port"
+        return 0
+      fi
+    fi
+  fi
+
+  command -v lsof >/dev/null 2>&1 || return 1
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if is_contextagent_pid "$pid"; then
+      port="$(listening_port_for_pid "$pid" || true)"
+      if [[ -n "$port" ]]; then
+        echo "$port"
+        return 0
+      fi
+    fi
+  done < <(lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | awk 'NF && !seen[$0]++')
+
+  return 1
+}
+
 show_recent_log_tail() {
   local log_path="$1"
   local line_count="${2:-80}"
