@@ -297,7 +297,7 @@ curl -X POST http://localhost:8080/context \
 # 健康检查
 curl http://localhost:8080/health
 
-# 或直接使用仓库脚本（会输出分项组件状态，并在 degraded 时返回非 0）
+# 或直接使用仓库脚本（默认对 llm/embedding 仅告警不阻断；可用 --strict-degraded 改为严格失败）
 bash scripts/health-check.sh
 make health-check
 ```

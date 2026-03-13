@@ -7,7 +7,8 @@ source "$SCRIPT_DIR/service-common.sh"
 TIMEOUT_SECONDS="${CA_HEALTH_TIMEOUT:-5}"
 STRICT_SKIPPED=false
 HEALTH_URL="${CA_HEALTH_URL:-}"
-ALLOW_DEGRADED_COMPONENTS="${CA_HEALTH_ALLOW_DEGRADED_COMPONENTS:-}"
+ALLOW_DEGRADED_COMPONENTS="${CA_HEALTH_ALLOW_DEGRADED_COMPONENTS:-llm,embedding}"
+STRICT_DEGRADED=false
 EXPLICIT_URL=false
 if [[ -n "$HEALTH_URL" ]]; then
   EXPLICIT_URL=true
@@ -16,14 +17,15 @@ fi
 usage() {
   cat <<'EOF'
 用法：
-  bash scripts/health-check.sh [--url URL] [--timeout SECONDS] [--strict-skipped] [--allow-degraded-components a,b]
+  bash scripts/health-check.sh [--url URL] [--timeout SECONDS] [--strict-skipped] [--strict-degraded] [--allow-degraded-components a,b]
 
 选项：
   --url URL           指定健康检查地址，默认根据运行态配置推导。
   --timeout SECONDS   curl 超时时间，默认 5 秒。
   --strict-skipped    将 skipped 组件也视为失败。
+  --strict-degraded   将所有 degraded 组件都视为失败（覆盖默认的 llm,embedding 宽松策略）。
   --allow-degraded-components CSV
-                      允许指定组件 degraded 但仍返回成功，例如 llm,embedding。
+                      允许指定组件 degraded 但仍返回成功；默认是 llm,embedding。
   -h, --help          显示帮助。
 EOF
 }
@@ -43,6 +45,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strict-skipped)
       STRICT_SKIPPED=true
+      shift
+      ;;
+    --strict-degraded)
+      STRICT_DEGRADED=true
+      ALLOW_DEGRADED_COMPONENTS=""
       shift
       ;;
     --allow-degraded-components)
@@ -71,6 +78,19 @@ if [[ -z "$HEALTH_URL" ]]; then
 fi
 
 info "执行健康检查：$HEALTH_URL"
+
+component_is_allowed_degraded() {
+  local name="$1"
+  local item
+  IFS=',' read -r -a _allowed_items <<< "$ALLOW_DEGRADED_COMPONENTS"
+  for item in "${_allowed_items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] || continue
+    [[ "$item" == "$name" ]] && return 0
+  done
+  return 1
+}
 
 fetch_health() {
   curl -fsS --max-time "$TIMEOUT_SECONDS" "$1" 2>/dev/null
@@ -172,7 +192,13 @@ while IFS=$'\t' read -r record_type col1 col2 col3 col4; do
           info "$message"
         fi
         ;;
-      degraded) error "$message" ;;
+      degraded)
+        if component_is_allowed_degraded "$component_name"; then
+          warn "$message"
+        else
+          error "$message"
+        fi
+        ;;
       *) warn "${component_name}: 状态=${component_status} ${detail}" ;;
     esac
   fi
