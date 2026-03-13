@@ -127,16 +127,16 @@ class HttpLLMAdapter(LLMPort):
     async def health_check(self) -> bool:
         try:
             resp = await self._client.get("/health")
-            return resp.status_code == 200
+            if resp.status_code == 200:
+                return True
         except Exception as exc:
             logger.debug("LLM health endpoint failed", error=str(exc))
-            try:
-                # Fallback: try a minimal completion
-                await self.complete("ping", "ping", max_tokens=1)
-                return True
-            except Exception as fallback_exc:
-                logger.debug("LLM completion fallback health check failed", error=str(fallback_exc))
-                return False
+        try:
+            resp = await self._client.get("/v1/models")
+            return resp.status_code == 200
+        except Exception as exc:
+            logger.debug("LLM model listing health check failed", error=str(exc))
+            return False
 
     async def close(self) -> None:
         await self._client.aclose()

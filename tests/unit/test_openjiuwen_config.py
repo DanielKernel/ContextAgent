@@ -8,6 +8,7 @@ import pytest
 
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
+    _bootstrap_long_term_memory,
     _build_db_store,
     _expand_env_placeholders,
     _instantiate_long_term_memory,
@@ -324,6 +325,51 @@ def test_build_db_store_reports_missing_asyncpg(monkeypatch):
 
     assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
     assert exc.value.details["missing_dependency"] == "asyncpg"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_long_term_memory_does_not_require_dsn_for_non_pgvector(monkeypatch):
+    class FakeLongTermMemory:
+        async def register_store(self, **kwargs):
+            self.kwargs = kwargs
+
+        def set_config(self, config):
+            self.config = config
+
+        async def set_scope_config(self, user_id, config):
+            self.user_id = user_id
+            self.scope_config = config
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        lambda module_name, symbol_name: (
+            type("InMemoryKVStore", (), {})
+            if module_name == "openjiuwen.core.foundation.store.kv.in_memory_kv_store"
+            else object
+        ),
+    )
+
+    def _raise_backend_unavailable(_backend, _vector_store_config):
+        raise ContextAgentError(
+            "backend unavailable",
+            code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+        )
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._instantiate_vector_store",
+        _raise_backend_unavailable,
+    )
+
+    with pytest.raises(ContextAgentError) as exc:
+        await _bootstrap_long_term_memory(
+            FakeLongTermMemory(),
+            {
+                "user_id": "context-agent",
+                "vector_store": {"backend": "qdrant"},
+            },
+        )
+
+    assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
 
 
 def test_instantiate_vector_store_reports_missing_pgvector_dependency(monkeypatch):

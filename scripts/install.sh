@@ -116,9 +116,9 @@ show_recent_log_tail() {
 diagnose_start_failure() {
   local pid="$1"
   if kill -0 "$pid" 2>/dev/null; then
-    warn "服务进程仍在运行，但健康检查未通过：PID=$pid"
+    warn "服务进程仍在运行，但健康检查未通过：PID=${pid}"
   else
-    warn "服务进程已提前退出：PID=$pid"
+    warn "服务进程已提前退出：PID=${pid}"
     rm -f "$PID_FILE"
   fi
   warn "最近日志如下：$LOG_FILE"

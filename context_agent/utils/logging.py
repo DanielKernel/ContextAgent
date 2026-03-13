@@ -8,6 +8,11 @@ import sys
 
 import structlog
 
+_QUIET_LOGGERS = (
+    "httpx",
+    "httpcore",
+)
+
 
 def _should_use_colors(stream: object | None = None) -> bool:
     """Return True only for interactive terminals unless env overrides it."""
@@ -66,6 +71,9 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
     root_logger = logging.getLogger()
     root_logger.handlers = [handler]
     root_logger.setLevel(level.upper())
+
+    for logger_name in _QUIET_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> structlog.BoundLogger:

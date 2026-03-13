@@ -127,7 +127,7 @@ while IFS=$'\t' read -r record_type col1 col2 col3 col4; do
     case "$col1" in
       ok) success "服务健康：$col2" ;;
       degraded) warn "服务降级：$col2" ;;
-      *) warn "服务状态未知（$col1）：$col2" ;;
+      *) warn "服务状态未知（${col1}）：${col2}" ;;
     esac
     continue
   fi

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from context_agent.utils.logging import _should_use_colors
+import logging
+
+from context_agent.utils.logging import _should_use_colors, configure_logging
 
 
 class _Stream:
@@ -35,3 +37,10 @@ def test_force_color_overrides_no_tty(monkeypatch):
     monkeypatch.setenv("FORCE_COLOR", "1")
     monkeypatch.delenv("NO_COLOR", raising=False)
     assert _should_use_colors(_Stream(False)) is True
+
+
+def test_configure_logging_quiets_http_clients():
+    configure_logging("INFO")
+
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

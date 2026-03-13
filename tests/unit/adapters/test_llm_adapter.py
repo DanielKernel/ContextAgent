@@ -46,15 +46,14 @@ class TestHttpLLMAdapter:
         await original_client.aclose()
         await adapter.close()
 
-    async def test_health_check_logs_fallback_failures(self):
+    async def test_health_check_logs_probe_failures(self):
         adapter = HttpLLMAdapter("https://example.com", "demo-model")
         original_client = adapter._client
         adapter._client = AsyncMock()
-        adapter._client.get = AsyncMock(side_effect=RuntimeError("health boom"))
+        adapter._client.get = AsyncMock(side_effect=[RuntimeError("health boom"), RuntimeError("models boom")])
 
-        with patch.object(adapter, "complete", AsyncMock(side_effect=AdapterError("LLM", "fallback boom"))):
-            with patch("context_agent.adapters.llm_adapter.logger.debug") as debug:
-                ok = await adapter.health_check()
+        with patch("context_agent.adapters.llm_adapter.logger.debug") as debug:
+            ok = await adapter.health_check()
 
         assert ok is False
         assert debug.call_count == 2
@@ -65,12 +64,21 @@ class TestHttpLLMAdapter:
         adapter = HttpLLMAdapter("https://example.com", "demo-model")
         original_client = adapter._client
         adapter._client = AsyncMock()
-        adapter._client.get = AsyncMock(side_effect=httpx.ConnectError("down"))
+        health_response = MagicMock(status_code=404)
+        models_response = MagicMock(status_code=200)
+        adapter._client.get = AsyncMock(return_value=health_response)
 
-        with patch.object(adapter, "complete", AsyncMock(return_value="pong")) as complete:
-            ok = await adapter.health_check()
+        async def get_side_effect(path: str):
+            if path == "/health":
+                return health_response
+            if path == "/v1/models":
+                return models_response
+            raise AssertionError(path)
+
+        adapter._client.get = AsyncMock(side_effect=get_side_effect)
+        ok = await adapter.health_check()
 
         assert ok is True
-        complete.assert_awaited_once()
+        assert adapter._client.get.await_count == 2
         await original_client.aclose()
         await adapter.close()

@@ -361,6 +361,14 @@ def _build_kv_store(db_engine: Any) -> Any:
     return DbBasedKVStore(db_engine)
 
 
+def _build_in_memory_kv_store() -> Any:
+    InMemoryKVStore = _import_openjiuwen_symbol(
+        "openjiuwen.core.foundation.store.kv.in_memory_kv_store",
+        "InMemoryKVStore",
+    )
+    return InMemoryKVStore()
+
+
 def _instantiate_vector_store(backend: str, vector_store_config: dict[str, Any]) -> Any:
     store_module = importlib.import_module("openjiuwen.core.foundation.store")
     create_vector_store = getattr(store_module, "create_vector_store", None)
@@ -466,9 +474,13 @@ async def _bootstrap_long_term_memory(ltm: Any, config: dict[str, Any]) -> Any:
             code=ErrorCode.CONFIGURATION_ERROR,
         )
 
-    backend = vector_store_config.get("backend", "pgvector")
-    db_engine, db_store = _build_db_store(vector_store_config)
-    kv_store = _build_kv_store(db_engine)
+    backend = str(vector_store_config.get("backend", "pgvector")).strip().lower()
+    db_store = None
+    if backend == "pgvector":
+        db_engine, db_store = _build_db_store(vector_store_config)
+        kv_store = _build_kv_store(db_engine)
+    else:
+        kv_store = _build_in_memory_kv_store()
     vector_store = _instantiate_vector_store(backend, vector_store_config)
     embedding_model = _build_embedding_model(config)
     await ltm.register_store(

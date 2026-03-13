@@ -195,9 +195,9 @@ show_recent_log_tail() {
 diagnose_contextagent_start_failure() {
   local pid="$1"
   if kill -0 "$pid" 2>/dev/null; then
-    warn "ContextAgent 进程仍在运行，但健康检查未通过：PID=$pid"
+    warn "ContextAgent 进程仍在运行，但健康检查未通过：PID=${pid}"
   else
-    warn "ContextAgent 进程已提前退出：PID=$pid"
+    warn "ContextAgent 进程已提前退出：PID=${pid}"
     rm -f "$PID_FILE"
   fi
   show_recent_log_tail "$LOG_FILE" 80
@@ -228,7 +228,7 @@ stop_contextagent() {
   fi
 
   if [[ -n "$pid" ]] && ! is_contextagent_pid "$pid"; then
-    warn "PID 文件指向的进程不是 ContextAgent，已清理 PID 文件：PID=$pid"
+    warn "PID 文件指向的进程不是 ContextAgent，已清理 PID 文件：PID=${pid}"
     rm -f "$PID_FILE"
     pid=""
   fi
@@ -237,7 +237,7 @@ stop_contextagent() {
     pid="$(find_contextagent_listener_pid "$HTTP_PORT" || true)"
     if [[ -n "$pid" ]]; then
       echo "$pid" > "$PID_FILE"
-      warn "根据端口 ${HTTP_PORT} 找到正在监听的 ContextAgent，已同步 PID：PID=$pid"
+      warn "根据端口 ${HTTP_PORT} 找到正在监听的 ContextAgent，已同步 PID：PID=${pid}"
     fi
   fi
 
@@ -246,7 +246,7 @@ stop_contextagent() {
     return 0
   fi
 
-  info "停止 ContextAgent（PID=$pid）..."
+  info "停止 ContextAgent（PID=${pid}）..."
   kill "$pid"
   for _ in $(seq 1 15); do
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -257,7 +257,7 @@ stop_contextagent() {
     sleep 1
   done
 
-  die "ContextAgent 停止超时，请检查进程状态：PID=$pid"
+  die "ContextAgent 停止超时，请检查进程状态：PID=${pid}"
 }
 
 start_contextagent() {
@@ -269,7 +269,7 @@ start_contextagent() {
   if contextagent_is_running; then
     local pid
     pid="$(cat "$PID_FILE")"
-    warn "ContextAgent 已在运行：PID=$pid"
+    warn "ContextAgent 已在运行：PID=${pid}"
     return 0
   fi
 
