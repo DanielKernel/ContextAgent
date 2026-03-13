@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,11 +25,10 @@ from context_agent.config.defaults import (
     RERANK_TOP_K,
 )
 from context_agent.core.memory.hotness import HOTNESS_ALPHA, compute_hotness
+from context_agent.core.retrieval.task_conditioning import apply_task_conditioning
 from context_agent.models.context import ContextItem
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
-
-import time
 
 logger = get_logger(__name__)
 
@@ -39,6 +39,8 @@ class RetrievalPlan:
 
     query: str
     scope_id: str
+    task_type: str = ""
+    agent_role: str = ""
     top_k: int = DEFAULT_TOP_K
     enable_hybrid: bool = True
     enable_graph: bool = False
@@ -98,7 +100,7 @@ class UnifiedSearchCoordinator:
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "search coordinator timeout",
                     scope_id=plan.scope_id,
@@ -108,7 +110,7 @@ class UnifiedSearchCoordinator:
 
             # Collect successful results
             all_items: list[list[ContextItem]] = []
-            for label, result in zip(labels, raw_results or []):
+            for label, result in zip(labels, raw_results or [], strict=False):
                 if isinstance(result, Exception):
                     logger.warning("retrieval path failed", path=label, error=str(result))
                     all_items.append([])
@@ -124,6 +126,12 @@ class UnifiedSearchCoordinator:
 
             if plan.rerank and fused:
                 fused = await self._retriever.rerank(plan.query, fused, plan.rerank_top_k)
+
+            fused = apply_task_conditioning(
+                fused,
+                task_type=plan.task_type,
+                agent_role=plan.agent_role,
+            )
 
             latency = record_latency(t0)
             logger.debug(

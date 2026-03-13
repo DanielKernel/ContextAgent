@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
+from unittest.mock import AsyncMock
 
-from context_agent.models.context import ContextItem, ContextSnapshot
+import pytest
+
+from context_agent.models.context import ContextItem, ContextSnapshot, MemoryType
 from context_agent.orchestration.context_aggregator import (
     AggregationRequest,
     ContextAggregator,
@@ -114,3 +116,33 @@ class TestContextAggregator:
         snapshot = await aggregator.aggregate(req)
         assert isinstance(snapshot, ContextSnapshot)
         assert snapshot.scope_id == "s1"
+
+    async def test_task_conditioning_reorders_items_for_task_execution(self):
+        procedural = ContextItem(
+            source_type="ltm",
+            content="run the deployment playbook",
+            score=0.49,
+            memory_type=MemoryType.PROCEDURAL,
+        )
+        semantic = ContextItem(
+            source_type="ltm",
+            content="company profile details",
+            score=0.55,
+            memory_type=MemoryType.SEMANTIC,
+        )
+
+        ltm = AsyncMock()
+        ltm.search = AsyncMock(return_value=[semantic, procedural])
+
+        aggregator = ContextAggregator(ltm=ltm)
+        req = AggregationRequest(
+            scope_id="s1",
+            session_id="sess1",
+            query="execute deployment",
+            task_type="task",
+            agent_role="executor",
+        )
+
+        snapshot = await aggregator.aggregate(req)
+
+        assert snapshot.items[0].memory_type == MemoryType.PROCEDURAL

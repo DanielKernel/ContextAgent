@@ -30,6 +30,7 @@ from context_agent.adapters.ltm_adapter import LongTermMemoryPort
 from context_agent.config.defaults import AGGREGATION_TIMEOUT_MS, DEFAULT_TOKEN_BUDGET
 from context_agent.core.context.jit_resolver import JITResolver
 from context_agent.core.memory.working_memory import WorkingMemoryManager
+from context_agent.core.retrieval.task_conditioning import apply_task_conditioning
 from context_agent.models.context import (
     ContextItem,
     ContextLevel,
@@ -37,7 +38,6 @@ from context_agent.models.context import (
     MemoryCategory,
 )
 from context_agent.models.ref import ContextRef
-from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
 
@@ -58,6 +58,8 @@ class AggregationRequest:
     enable_working_memory: bool = True
     timeout_ms: float = AGGREGATION_TIMEOUT_MS
     extra_metadata: dict = field(default_factory=dict)
+    task_type: str = ""
+    agent_role: str = ""
     # Dual-path retrieval mode (adapted from OpenViking find/search)
     mode: Literal["fast", "quality"] = "fast"
     # Maximum content detail level to inject (L0/L1/L2 progressive expansion)
@@ -126,7 +128,7 @@ class ContextAggregator:
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "aggregation timeout",
                     scope_id=request.scope_id,
@@ -135,11 +137,11 @@ class ContextAggregator:
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-                results = [asyncio.TimeoutError() for _ in labels]
+                results = [TimeoutError() for _ in labels]
 
             all_items: list[ContextItem] = []
             degraded: list[str] = []
-            for label, result in zip(labels, results or []):
+            for label, result in zip(labels, results or [], strict=False):
                 if isinstance(result, Exception):
                     logger.warning("source failed", source=label, error=str(result))
                     degraded.append(label)
@@ -164,6 +166,11 @@ class ContextAggregator:
             # ── Dedup, sort, budget ──────────────────────────────────────────
             deduplicated = self._deduplicate(all_items)
             sorted_items = sorted(deduplicated, key=lambda x: x.score, reverse=True)
+            sorted_items = apply_task_conditioning(
+                sorted_items,
+                task_type=request.task_type,
+                agent_role=request.agent_role,
+            )
             budgeted = self._apply_token_budget(sorted_items, request.token_budget)
 
             total_tokens = sum(len(i.content) // 4 for i in budgeted)

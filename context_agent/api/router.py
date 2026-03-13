@@ -28,7 +28,6 @@ from context_agent.orchestration.strategy_scheduler import (
     HybridStrategyScheduler,
     StrategySelectionContext,
 )
-from context_agent.utils.errors import ContextAgentError
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
 
@@ -94,7 +93,6 @@ class ContextAPIRouter:
             t0 = time.monotonic()
 
             # 1. Aggregate
-            from context_agent.models.context import ContextLevel, MemoryCategory
             agg_request = AggregationRequest(
                 scope_id=scope_id,
                 session_id=session_id,
@@ -102,6 +100,8 @@ class ContextAPIRouter:
                 refs=refs or [],
                 token_budget=token_budget,
                 top_k=top_k,
+                task_type=task_type,
+                agent_role=agent_role,
                 mode=mode,  # type: ignore[arg-type]
                 category_filter=category_filter,
             )
@@ -145,6 +145,8 @@ class ContextAPIRouter:
                     scope_id=scope_id,
                     query=query,
                     top_k=top_k,
+                    task_type=task_type,
+                    agent_role=agent_role,
                 )
                 output = ContextOutput(
                     scope_id=scope_id,
@@ -221,17 +223,29 @@ class ContextAPIRouter:
         scope_id: str,
         query: str,
         top_k: int,
+        task_type: str,
+        agent_role: str,
     ) -> list[Any]:
         """Return tiered-recall results for SEARCH output, falling back to aggregated items."""
+        from context_agent.core.retrieval.task_conditioning import apply_task_conditioning
+
         if self._tiered_router is None:
-            return snapshot.items[:top_k]
+            return apply_task_conditioning(
+                snapshot.items[:top_k],
+                task_type=task_type,
+                agent_role=agent_role,
+            )
 
         items, _latencies = await self._tiered_router.search(
             scope_id=scope_id,
             query=query,
             top_k=top_k,
         )
-        return items
+        return apply_task_conditioning(
+            items,
+            task_type=task_type,
+            agent_role=agent_role,
+        )[:top_k]
 
     async def mark_used(
         self, scope_id: str, session_id: str, item_ids: list[str]

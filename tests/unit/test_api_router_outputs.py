@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from context_agent.api.router import ContextAPIRouter
-from context_agent.models.context import ContextItem, ContextOutput, ContextSnapshot, OutputType
+from context_agent.models.context import (
+    ContextItem,
+    ContextOutput,
+    ContextSnapshot,
+    MemoryType,
+    OutputType,
+)
 
 
 def _snapshot() -> ContextSnapshot:
@@ -139,3 +145,40 @@ class TestContextAPIRouterOutputs:
         assert output.degraded is True
         assert any("Degraded sources: ltm" == warning for warning in warnings)
         assert any("Output degraded: compression_fallback_raw" == warning for warning in warnings)
+
+    async def test_search_output_applies_task_conditioning_to_tiered_results(self):
+        aggregator = AsyncMock()
+        aggregator.aggregate = AsyncMock(return_value=_snapshot())
+        tiered_router = AsyncMock()
+        semantic = ContextItem(
+            source_type="ltm",
+            content="background policy",
+            score=0.55,
+            memory_type=MemoryType.SEMANTIC,
+        )
+        procedural = ContextItem(
+            source_type="ltm",
+            content="deployment checklist",
+            score=0.49,
+            memory_type=MemoryType.PROCEDURAL,
+            tier="hot",
+        )
+        tiered_router.search = AsyncMock(return_value=([semantic, procedural], {"hot": 1.2}))
+        router = ContextAPIRouter(
+            aggregator=aggregator,
+            tiered_router=tiered_router,
+        )
+
+        output, warnings = await router.handle(
+            scope_id="scope-1",
+            session_id="sess-1",
+            query="deploy",
+            output_type=OutputType.SEARCH,
+            task_type="task",
+            agent_role="executor",
+            top_k=2,
+        )
+
+        assert warnings == []
+        assert output.search_items is not None
+        assert output.search_items[0].memory_type == MemoryType.PROCEDURAL

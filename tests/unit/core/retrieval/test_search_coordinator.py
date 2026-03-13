@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from context_agent.core.retrieval.search_coordinator import (
     RetrievalPlan,
     UnifiedSearchCoordinator,
 )
-from context_agent.models.context import ContextItem
+from context_agent.models.context import ContextItem, MemoryType
 
 
 def _items(n: int, id_prefix: str = "i") -> list[ContextItem]:
@@ -79,3 +80,31 @@ class TestUnifiedSearchCoordinator:
         # Should not raise
         results = await coordinator.search(plan)
         assert results == []
+
+    async def test_task_conditioning_promotes_execution_memories(self):
+        semantic = ContextItem(
+            source_type="ltm",
+            content="background company history",
+            score=0.55,
+            memory_type=MemoryType.SEMANTIC,
+        )
+        procedural = ContextItem(
+            source_type="ltm",
+            content="deployment runbook",
+            score=0.49,
+            memory_type=MemoryType.PROCEDURAL,
+            tier="hot",
+        )
+        retriever = _mock_retriever(hybrid=[semantic, procedural])
+        plan = RetrievalPlan(
+            query="deploy the service",
+            scope_id="s1",
+            task_type="task",
+            agent_role="executor",
+            rerank=False,
+        )
+        coordinator = UnifiedSearchCoordinator(retriever=retriever)
+
+        results = await coordinator.search(plan)
+
+        assert results[0].memory_type == MemoryType.PROCEDURAL
