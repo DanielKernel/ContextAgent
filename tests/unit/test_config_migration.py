@@ -79,16 +79,16 @@ def test_merge_preserving_existing_can_replace_vector_store_only():
     defaults = {
         "user_id": "context-agent",
         "llm_config": {
-            "model": "gpt-4o-mini",
+            "model": "${CTXLLM_MODEL}",
             "timeout": 30,
         },
         "embedding_config": {
-            "model": "text-embedding-3-large",
-            "dimension": 3072,
+            "model": "${EMBED_MODEL}",
+            "dimension": 1024,
         },
         "vector_store": {
             "backend": "pgvector",
-            "dsn": "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable",
+            "dsn": "postgresql://postgres@127.0.0.1:55432/context_agent",
         },
         "memory_config": {
             "top_k": 10,
@@ -106,7 +106,7 @@ def test_merge_preserving_existing_can_replace_vector_store_only():
     assert merged["llm_config"]["api_key"] == "${CUSTOM_KEY}"
     assert merged["llm_config"]["timeout"] == 30
     assert merged["embedding_config"]["model"] == "custom-embedding"
-    assert merged["embedding_config"]["dimension"] == 3072
+    assert merged["embedding_config"]["dimension"] == 1024
     assert merged["vector_store"] == defaults["vector_store"]
     assert merged["memory_config"] == {"top_k": 10}
     assert "memory_config" in inserted
@@ -132,11 +132,11 @@ def test_migrate_config_file_can_replace_top_level_keys(tmp_path):
         "\n".join(
             [
                 "llm_config:",
-                "  model: gpt-4o-mini",
+                "  model: ${CTXLLM_MODEL}",
                 "  timeout: 30",
                 "vector_store:",
                 "  backend: pgvector",
-                "  dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable",
+                "  dsn: postgresql://postgres@127.0.0.1:55432/context_agent",
             ]
         )
         + "\n",
@@ -154,5 +154,5 @@ def test_migrate_config_file_can_replace_top_level_keys(tmp_path):
     assert "model: custom-model" in text
     assert "timeout: 30" in text
     assert "backend: pgvector" in text
-    assert "dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable" in text
+    assert "dsn: postgresql://postgres@127.0.0.1:55432/context_agent" in text
     assert "host: 10.0.0.8" not in text

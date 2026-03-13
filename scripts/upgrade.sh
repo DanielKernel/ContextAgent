@@ -406,7 +406,7 @@ fi
 step "执行数据库幂等迁移"
 if [[ "$VECTOR_BACKEND" == "pgvector" && -n "$PG_DSN" ]]; then
   if ! [[ "${PG_EMBED_DIM:-}" =~ ^[0-9]+$ ]]; then
-    PG_EMBED_DIM="3072"
+    PG_EMBED_DIM="1024"
   fi
   PG_SCHEMA="${PG_SCHEMA:-public}"
   PG_TABLE="${PG_TABLE:-ltm_memory}"

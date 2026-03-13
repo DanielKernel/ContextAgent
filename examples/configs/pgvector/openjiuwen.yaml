@@ -2,26 +2,26 @@ user_id: context-agent
 
 llm_config:
   provider: openai
-  model: gpt-4o-mini
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1
+  model: ${CTXLLM_MODEL}
+  api_key: ${CTXLLM_API_KEY}
+  base_url: ${CTXLLM_BASE_URL}
   timeout: 30
   max_retries: 2
 
 embedding_config:
   provider: openai
-  model: text-embedding-3-large
-  api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1
-  dimension: 3072
-  batch_size: 32
+  model: ${EMBED_MODEL}
+  api_key: ${EMBED_API_KEY}
+  base_url: ${EMBED_BASE_URL}
+  dimension: 1024
+  batch_size: 10
 
 vector_store:
   backend: pgvector
   dsn: postgresql://postgres@127.0.0.1:55432/context_agent
   schema: public
   table_name: ltm_memory
-  embedding_dimension: 3072
+  embedding_dimension: 1024
   distance: cosine
   index_type: ivfflat
   lists: 100
