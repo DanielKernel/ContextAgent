@@ -348,6 +348,15 @@ def _instantiate_vector_store(backend: str, vector_store_config: dict[str, Any])
     kwargs = {key: value for key, value in kwargs.items() if value is not None}
 
     def _instantiate_with_supported_kwargs(store_cls: Any) -> Any:
+        if backend == "pgvector":
+            from context_agent.adapters.openjiuwen_pgvector_store import OpenJiuwenPGVectorStoreBridge
+
+            return OpenJiuwenPGVectorStoreBridge(
+                {
+                    **vector_store_config,
+                    "dsn": _normalize_async_dsn(vector_store_config.get("dsn", "")),
+                }
+            )
         try:
             signature = inspect.signature(store_cls)
         except (TypeError, ValueError):
@@ -370,6 +379,7 @@ def _instantiate_vector_store(backend: str, vector_store_config: dict[str, Any])
 
     class_candidates = {
         "pgvector": [
+            ("openjiuwen.core.retrieval.vector_store.pg_store", "PGVectorStore"),
             ("openjiuwen.core.foundation.store.vector.pgvector_vector_store", "PGVectorStore"),
             ("openjiuwen.core.foundation.store.vector.pgvector_store", "PGVectorStore"),
             ("openjiuwen.core.foundation.store.vector.pg_vector_store", "PGVectorStore"),
@@ -387,6 +397,20 @@ def _instantiate_vector_store(backend: str, vector_store_config: dict[str, Any])
     for module_name, class_name in class_candidates.get(backend, []):
         try:
             store_cls = _import_openjiuwen_symbol(module_name, class_name)
+        except ModuleNotFoundError as exc:
+            if backend == "pgvector" and exc.name == "pgvector":
+                raise ContextAgentError(
+                    "Python package 'pgvector' is required for openJiuwen pgvector startup. "
+                    "Reinstall ContextAgent with the openjiuwen extra.",
+                    code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+                    details={
+                        "backend": backend,
+                        "missing_dependency": "pgvector",
+                        "module": module_name,
+                    },
+                ) from exc
+            errors.append(f"{module_name}.{class_name}: {exc}")
+            continue
         except (ImportError, AttributeError) as exc:
             errors.append(f"{module_name}.{class_name}: {exc}")
             continue

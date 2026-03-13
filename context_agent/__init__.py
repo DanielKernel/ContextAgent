@@ -13,7 +13,6 @@ Public API surface (all stable exports):
 
 from __future__ import annotations
 
-from context_agent.api.http_handler import create_app
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.settings import Settings, get_settings
 from context_agent.models.context import (
@@ -44,6 +43,12 @@ from context_agent.strategies.registry import (
 from context_agent.utils.logging import configure_logging, get_logger
 
 __version__ = "0.1.0"
+
+
+def create_app(*args: object, **kwargs: object) -> object:
+    from context_agent.api.http_handler import create_app as _create_app
+
+    return _create_app(*args, **kwargs)
 __all__ = [
     # API layer
     "create_app",

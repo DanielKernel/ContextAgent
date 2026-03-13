@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from context_agent.api.router import ContextAPIRouter
@@ -9,6 +11,7 @@ from context_agent.config.openjiuwen import (
     _build_db_store,
     _expand_env_placeholders,
     _instantiate_long_term_memory,
+    _instantiate_vector_store,
     _normalize_async_dsn,
     build_default_api_router,
     load_openjiuwen_config,
@@ -268,3 +271,76 @@ def test_build_db_store_reports_missing_asyncpg(monkeypatch):
 
     assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
     assert exc.value.details["missing_dependency"] == "asyncpg"
+
+
+def test_instantiate_vector_store_reports_missing_pgvector_dependency(monkeypatch):
+    monkeypatch.setattr(
+        "importlib.import_module",
+        lambda name: type("StoreModule", (), {"create_vector_store": lambda *_args, **_kwargs: None})()
+        if name == "openjiuwen.core.foundation.store"
+        else __import__(name),
+    )
+
+    def _raise_missing_pgvector(module_name, symbol_name):
+        if module_name == "openjiuwen.core.retrieval.vector_store.pg_store":
+            raise ModuleNotFoundError("No module named 'pgvector'", name="pgvector")
+        raise ModuleNotFoundError(module_name, name=module_name)
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _raise_missing_pgvector,
+    )
+
+    with pytest.raises(ContextAgentError) as exc:
+        _instantiate_vector_store(
+            "pgvector",
+            {
+                "dsn": "postgresql://localhost/context_agent",
+                "table_name": "ltm_memory",
+                "schema": "public",
+                "embedding_dimension": 3072,
+            },
+        )
+
+    assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
+    assert exc.value.details["missing_dependency"] == "pgvector"
+
+
+def test_instantiate_vector_store_uses_pgvector_bridge(monkeypatch):
+    class FakeBridge:
+        def __init__(self, config):
+            self.config = config
+
+    original_import_module = importlib.import_module
+    monkeypatch.setattr(
+        "importlib.import_module",
+        lambda name: type("StoreModule", (), {"create_vector_store": lambda *_args, **_kwargs: None})()
+        if name == "openjiuwen.core.foundation.store"
+        else original_import_module(name),
+    )
+    monkeypatch.setattr(
+        "context_agent.adapters.openjiuwen_pgvector_store.OpenJiuwenPGVectorStoreBridge",
+        FakeBridge,
+    )
+
+    def _fake_import(module_name, symbol_name):
+        if module_name == "openjiuwen.core.retrieval.vector_store.pg_store":
+            return object
+        raise ModuleNotFoundError(module_name, name=module_name)
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+
+    store = _instantiate_vector_store(
+        "pgvector",
+        {
+            "dsn": "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable",
+            "table_name": "ltm_memory",
+            "distance": "cosine",
+        },
+    )
+
+    assert isinstance(store, FakeBridge)
+    assert store.config["dsn"] == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
