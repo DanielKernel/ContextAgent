@@ -384,10 +384,13 @@ def _build_db_store(vector_store_config: dict[str, Any]) -> tuple[Any, Any]:
 
 
 def _build_kv_store(db_engine: Any) -> Any:
-    DbBasedKVStore = _import_openjiuwen_symbol(
-        "openjiuwen.core.foundation.store.kv.db_based_kv_store",
-        "DbBasedKVStore",
-    )
+    module_name = "openjiuwen.core.foundation.store.kv.db_based_kv_store"
+    module = importlib.import_module(module_name)
+    if getattr(db_engine.dialect, "name", "") == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        setattr(module, "insert", pg_insert)
+    DbBasedKVStore = getattr(module, "DbBasedKVStore")
     return DbBasedKVStore(db_engine)
 
 
