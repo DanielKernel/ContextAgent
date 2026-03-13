@@ -171,3 +171,14 @@ class TestCompressionStrategyRouter:
         assert compressor.await_args.kwargs["query"] == "What changed?"
         assert output.output_type == OutputType.COMPRESSED
         assert "compressed answer" in output.content
+
+    async def test_router_injects_llm_adapter_into_default_strategies(self):
+        llm = object()
+
+        CompressionStrategyRouter(llm_adapter=llm)
+        registry = StrategyRegistry.instance()
+
+        assert registry.get("qa")._llm is llm
+        assert registry.get("task")._llm is llm
+        assert registry.get("long_session")._llm is llm
+        assert registry.get("compaction")._llm is llm

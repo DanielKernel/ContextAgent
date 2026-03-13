@@ -41,6 +41,7 @@ class ContextAPIRouter:
         self,
         aggregator: ContextAggregator,
         compression_router: CompressionStrategyRouter | None = None,
+        llm_adapter: Any | None = None,
         exposure_controller: ExposureController | None = None,
         health_checker: ContextHealthChecker | None = None,
         version_manager: ContextVersionManager | None = None,
@@ -52,7 +53,9 @@ class ContextAPIRouter:
         tool_governor: Any | None = None,
     ) -> None:
         self._aggregator = aggregator
-        self._compression = compression_router or CompressionStrategyRouter()
+        self._compression = compression_router or CompressionStrategyRouter(
+            llm_adapter=llm_adapter
+        )
         self._ec = exposure_controller or ExposureController()
         self._hc = health_checker
         self._vm = version_manager or ContextVersionManager()

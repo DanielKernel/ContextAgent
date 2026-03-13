@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from context_agent.strategies.base import CompressionStrategy
 from context_agent.utils.errors import StrategyNotFoundError
 from context_agent.utils.logging import get_logger
@@ -57,7 +59,7 @@ class StrategyRegistry:
         cls._instance = None
 
 
-def ensure_default_strategies_registered() -> None:
+def ensure_default_strategies_registered(llm_adapter: Any | None = None) -> None:
     """Register built-in compression strategies if they are missing."""
     from context_agent.strategies.compaction_strategy import CompactionStrategy
     from context_agent.strategies.long_session_strategy import LongSessionCompressionStrategy
@@ -67,14 +69,31 @@ def ensure_default_strategies_registered() -> None:
 
     registry = StrategyRegistry.instance()
     strategies = [
-        QACompressionStrategy(),
-        TaskCompressionStrategy(),
-        LongSessionCompressionStrategy(),
+        QACompressionStrategy(llm_adapter=llm_adapter),
+        TaskCompressionStrategy(llm_adapter=llm_adapter),
+        LongSessionCompressionStrategy(llm_adapter=llm_adapter),
         RealtimeCompressionStrategy(),
-        CompactionStrategy(),
+        CompactionStrategy(llm_adapter=llm_adapter),
     ]
     for strategy in strategies:
-        try:
+        if strategy.strategy_id not in registry.list():
             registry.register(strategy)
-        except ValueError:
             continue
+        _refresh_strategy_llm_adapter(
+            registry.get(strategy.strategy_id),
+            llm_adapter=llm_adapter,
+        )
+
+
+def _refresh_strategy_llm_adapter(
+    strategy: CompressionStrategy,
+    llm_adapter: Any | None,
+) -> None:
+    """Attach/update llm_adapter on existing strategies that support it."""
+    if llm_adapter is None or not hasattr(strategy, "_llm"):
+        return
+    current_llm = getattr(strategy, "_llm", None)
+    if current_llm is llm_adapter:
+        return
+    setattr(strategy, "_llm", llm_adapter)
+    logger.info("strategy llm adapter updated", strategy_id=strategy.strategy_id)

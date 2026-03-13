@@ -88,6 +88,26 @@ class TestStrategyRegistry:
         assert "qa" in registry.list()
         assert "task" in registry.list()
 
+    def test_ensure_default_strategies_registered_refreshes_existing_llm_support(self):
+        registry = StrategyRegistry.instance()
+        ensure_default_strategies_registered()
+        qa = registry.get("qa")
+        task = registry.get("task")
+        long_session = registry.get("long_session")
+        compaction = registry.get("compaction")
+        llm = object()
+
+        ensure_default_strategies_registered(llm_adapter=llm)
+
+        assert registry.get("qa") is qa
+        assert registry.get("task") is task
+        assert registry.get("long_session") is long_session
+        assert registry.get("compaction") is compaction
+        assert qa._llm is llm
+        assert task._llm is llm
+        assert long_session._llm is llm
+        assert compaction._llm is llm
+
 
 class TestDoubleStrategy:
     @pytest.mark.asyncio

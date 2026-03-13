@@ -13,6 +13,7 @@ from context_agent.config.openjiuwen import (
     _instantiate_long_term_memory,
     _instantiate_vector_store,
     _normalize_async_dsn,
+    build_default_llm_adapter,
     build_default_api_router,
     load_openjiuwen_config,
     resolve_openjiuwen_config_path,
@@ -78,6 +79,39 @@ def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path)
     assert router._memory_processor is not None
 
 
+def test_build_default_api_router_wires_llm_adapter(monkeypatch):
+    from context_agent.strategies.registry import StrategyRegistry
+
+    StrategyRegistry.reset()
+
+    class FakeLLMAdapter:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.HttpLLMAdapter",
+        FakeLLMAdapter,
+    )
+
+    router = build_default_api_router(
+        settings=Settings(
+            openjiuwen_config_path="",
+            llm_base_url="https://llm.example.com",
+            llm_model="demo-model",
+            llm_api_key="top-secret",
+        )
+    )
+
+    qa_strategy = router._compression._registry.get("qa")
+
+    assert isinstance(qa_strategy._llm, FakeLLMAdapter)
+    assert qa_strategy._llm.kwargs["base_url"] == "https://llm.example.com"
+    assert qa_strategy._llm.kwargs["model"] == "demo-model"
+    assert qa_strategy._llm.kwargs["api_key"] == "top-secret"
+
+    StrategyRegistry.reset()
+
+
 def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeypatch, tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
     config_path.write_text("user_id: context-agent\n", encoding="utf-8")
@@ -121,6 +155,14 @@ def test_build_default_api_router_uses_default_openjiuwen_path(monkeypatch, tmp_
     router = build_default_api_router(settings=Settings(openjiuwen_config_path=""))
 
     assert router._aggregator._ltm is sentinel_adapter
+
+
+def test_build_default_llm_adapter_returns_none_for_blank_endpoint():
+    adapter = build_default_llm_adapter(
+        Settings(llm_base_url="", llm_model="demo-model")
+    )
+
+    assert adapter is None
 
 
 def test_resolve_openjiuwen_config_path_uses_env(monkeypatch, tmp_path):

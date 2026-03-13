@@ -33,6 +33,7 @@ _SECTION_FIELD_MAP: dict[tuple[str, ...], str] = {
     ("storage", "s3", "secret_key"): "s3_secret_key",
     ("llm", "base_url"): "llm_base_url",
     ("llm", "model"): "llm_model",
+    ("llm", "api_key"): "llm_api_key",
     ("llm", "timeout_s"): "llm_timeout_s",
     ("llm", "max_retries"): "llm_max_retries",
     ("integrations", "openjiuwen", "config_path"): "openjiuwen_config_path",
@@ -182,6 +183,7 @@ class Settings(BaseSettings):
     # ── LLM service (compression / summarization) ────────────────────────────
     llm_base_url: str = "http://localhost:11434"  # Ollama default
     llm_model: str = "qwen2.5:7b"
+    llm_api_key: str = ""
     llm_timeout_s: float = 30.0
     llm_max_retries: int = 2
 

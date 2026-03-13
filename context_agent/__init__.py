@@ -36,10 +36,7 @@ from context_agent.orchestration.strategy_scheduler import (
     StrategySelectionContext,
 )
 from context_agent.orchestration.sub_agent_manager import SubAgentContextManager
-from context_agent.strategies.registry import (
-    StrategyRegistry,
-    ensure_default_strategies_registered,
-)
+from context_agent.strategies.registry import StrategyRegistry
 from context_agent.utils.logging import configure_logging, get_logger
 
 __version__ = "0.1.0"
@@ -80,6 +77,3 @@ __all__ = [
     # Metadata
     "__version__",
 ]
-
-# Auto-register built-in strategies on import
-ensure_default_strategies_registered()

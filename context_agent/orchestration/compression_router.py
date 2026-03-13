@@ -30,8 +30,12 @@ logger = get_logger(__name__)
 class CompressionStrategyRouter:
     """Applies the best available compression strategy to a ContextSnapshot."""
 
-    def __init__(self, scheduler: HybridStrategyScheduler | None = None) -> None:
-        ensure_default_strategies_registered()
+    def __init__(
+        self,
+        scheduler: HybridStrategyScheduler | None = None,
+        llm_adapter: object | None = None,
+    ) -> None:
+        ensure_default_strategies_registered(llm_adapter=llm_adapter)
         self._scheduler = scheduler or HybridStrategyScheduler()
         self._registry = StrategyRegistry.instance()
 

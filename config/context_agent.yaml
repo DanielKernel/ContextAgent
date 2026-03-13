@@ -22,6 +22,7 @@ storage:
 llm:
   base_url: http://localhost:11434
   model: qwen2.5:7b
+  api_key: ""
   timeout_s: 30.0
   max_retries: 2
 

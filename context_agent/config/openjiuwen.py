@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from context_agent.adapters.llm_adapter import HttpLLMAdapter
 from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.settings import (
@@ -547,7 +548,30 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
             reason="No openJiuwen config file was found",
         )
 
+    llm_adapter = build_default_llm_adapter(runtime_settings)
+    if llm_adapter is not None:
+        router_kwargs["llm_adapter"] = llm_adapter
+
     return ContextAPIRouter(
         aggregator=ContextAggregator(**aggregator_kwargs),
         **router_kwargs,
+    )
+
+
+def build_default_llm_adapter(settings: Settings | None = None) -> HttpLLMAdapter | None:
+    """Build the default HTTP LLM adapter for compression/summarization."""
+    runtime_settings = settings or get_settings()
+    if not runtime_settings.llm_base_url.strip() or not runtime_settings.llm_model.strip():
+        logger.info(
+            "starting without default llm adapter",
+            reason="LLM base_url or model is empty",
+        )
+        return None
+
+    return HttpLLMAdapter(
+        base_url=runtime_settings.llm_base_url,
+        model=runtime_settings.llm_model,
+        timeout_s=runtime_settings.llm_timeout_s,
+        max_retries=runtime_settings.llm_max_retries,
+        api_key=runtime_settings.llm_api_key,
     )

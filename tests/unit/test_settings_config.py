@@ -17,6 +17,8 @@ service:
   log_level: DEBUG
 http:
   port: 9010
+llm:
+  api_key: secret-key
 integrations:
   openjiuwen:
     config_path: openjiuwen.yaml
@@ -33,6 +35,7 @@ auth:
 
     assert settings.http_port == 9010
     assert settings.log_level == "DEBUG"
+    assert settings.llm_api_key == "secret-key"
     assert settings.api_keys == ["key-1"]
     assert settings.openjiuwen_config_path == str((config_dir / "openjiuwen.yaml").resolve())
 
