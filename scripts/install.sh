@@ -287,7 +287,7 @@ if $START_SERVICE; then
   info "等待服务启动..."
   STARTED=false
   for i in $(seq 1 15); do
-    if curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" &>/dev/null; then
+    if bash "$SCRIPT_DIR/health-check.sh" --url "http://127.0.0.1:$PORT/health" --timeout 2 >/dev/null 2>&1; then
       success "服务已就绪：http://localhost:$PORT"
       echo "  日志：$LOG_FILE"
       echo "  PID 文件：$PID_FILE"

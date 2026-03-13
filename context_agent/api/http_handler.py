@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -28,11 +29,21 @@ from context_agent.api.schemas import (
     WriteResponse,
 )
 from context_agent.config.settings import get_settings
+from context_agent.core.monitoring.runtime_health import RuntimeDependencyHealthChecker
 from context_agent.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
 _START_TIME = time.monotonic()
+
+
+def _known_attr(obj: object | None, name: str) -> object | None:
+    if obj is None:
+        return None
+    values = getattr(obj, "__dict__", None)
+    if not isinstance(values, dict):
+        return None
+    return values.get(name)
 
 
 def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
@@ -45,13 +56,14 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     configure_logging(settings.LOG_LEVEL)
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("ContextAgent HTTP service starting", version="0.1.0")
-        if api_router is not None and getattr(api_router, "_memory_processor", None) is not None:
-            await api_router._memory_processor.start()
+        memory_processor = _known_attr(api_router, "_memory_processor")
+        if memory_processor is not None:
+            await memory_processor.start()
         yield
-        if api_router is not None and getattr(api_router, "_memory_processor", None) is not None:
-            await api_router._memory_processor.stop()
+        if memory_processor is not None:
+            await memory_processor.stop()
         logger.info("ContextAgent HTTP service shutting down")
 
     app = FastAPI(
@@ -70,6 +82,12 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
 
     # Store the router instance in app state so routes can access it
     app.state.api_router = api_router
+    app.state.runtime_health_checker = _known_attr(
+        api_router, "_runtime_health_checker"
+    ) or RuntimeDependencyHealthChecker(
+        settings=settings,
+        llm_adapter=_known_attr(api_router, "_llm_adapter"),
+    )
 
     # Mount the OpenClaw context-engine bridge (unauthenticated sub-router;
     # security is handled at the network/plugin-config level)
@@ -78,14 +96,29 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     # ── Routes ────────────────────────────────────────────────────────────────
 
     @app.get("/health", response_model=HealthResponse, tags=["ops"])
-    async def health() -> HealthResponse:
+    async def health(request: Request) -> HealthResponse:
+        checker: RuntimeDependencyHealthChecker | None = request.app.state.runtime_health_checker
+        components: dict[str, dict[str, object]] = {}
+        status = "ok"
+        if checker is not None:
+            report = await checker.check(request.app.state.api_router)
+            status = report.status
+            components = {
+                name: component.to_dict() for name, component in report.components.items()
+            }
         return HealthResponse(
-            status="ok",
+            status=status,
             version="0.1.0",
             uptime_s=round(time.monotonic() - _START_TIME, 1),
+            components=components,
         )
 
-    @app.post("/context", response_model=ContextResponse, tags=["context"], dependencies=[RequireAuth])
+    @app.post(
+        "/context",
+        response_model=ContextResponse,
+        tags=["context"],
+        dependencies=[RequireAuth],
+    )
     async def retrieve_context(
         req: ContextRequest,
         request: Request,
@@ -112,7 +145,7 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
             )
         except Exception as exc:
             logger.exception("context retrieval error", error=str(exc))
-            raise HTTPException(status_code=500, detail=str(exc))
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         return ContextResponse(
             request_id=uuid.uuid4().hex,
@@ -123,7 +156,12 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
             warnings=warnings,
         )
 
-    @app.post("/context/write", response_model=WriteResponse, tags=["context"], dependencies=[RequireAuth])
+    @app.post(
+        "/context/write",
+        response_model=WriteResponse,
+        tags=["context"],
+        dependencies=[RequireAuth],
+    )
     async def write_context(req: WriteRequest, request: Request) -> WriteResponse:
         """Persist memory through working memory and openJiuwen-managed long-term memory."""
         router: ContextAPIRouter | None = request.app.state.api_router
@@ -154,14 +192,23 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         tags=["versioning"],
         dependencies=[RequireAuth],
     )
-    async def list_versions(scope_id: str, session_id: str = "", request: Request = None) -> VersionListResponse:
+    async def list_versions(
+        scope_id: str,
+        session_id: str = "",
+        request: Request = None,
+    ) -> VersionListResponse:
         router: ContextAPIRouter | None = request.app.state.api_router if request else None
         if router is None:
             return VersionListResponse(versions=[])
         records = await router._vm.list_versions(scope_id, session_id)
         return VersionListResponse(versions=[r.model_dump(mode="json") for r in records])
 
-    @app.post("/context/delegate", response_model=DelegateResponse, tags=["multi-agent"], dependencies=[RequireAuth])
+    @app.post(
+        "/context/delegate",
+        response_model=DelegateResponse,
+        tags=["multi-agent"],
+        dependencies=[RequireAuth],
+    )
     async def delegate_context(req: DelegateRequest, request: Request) -> DelegateResponse:
         """Create a child scope for sub-agent delegation."""
         from context_agent.models.context import ContextSnapshot

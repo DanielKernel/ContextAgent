@@ -127,6 +127,24 @@ load_contextagent_runtime() {
   HTTP_PORT="${HTTP_PORT:-8000}"
 }
 
+contextagent_health_url() {
+  local host="$HTTP_HOST"
+  if [[ "$host" == "0.0.0.0" || "$host" == "::" ]]; then
+    host="127.0.0.1"
+  fi
+  echo "http://${host}:${HTTP_PORT}/health"
+}
+
+run_contextagent_health_check() {
+  local timeout_seconds="${1:-2}"
+  local health_url
+  health_url="$(contextagent_health_url)"
+  bash "$SCRIPT_DIR/health-check.sh" \
+    --url "$health_url" \
+    --timeout "$timeout_seconds" \
+    >/dev/null 2>&1
+}
+
 find_listening_pid() {
   local port="$1"
   command -v lsof >/dev/null 2>&1 || return 1
@@ -284,7 +302,7 @@ start_contextagent() {
   echo "$pid" > "$PID_FILE"
 
   for _ in $(seq 1 20); do
-    if curl -sf --max-time 2 "http://127.0.0.1:${HTTP_PORT}/health" >/dev/null 2>&1; then
+    if run_contextagent_health_check 2; then
       success "ContextAgent 已启动：http://127.0.0.1:${HTTP_PORT}"
       return 0
     fi

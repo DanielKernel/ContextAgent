@@ -51,8 +51,10 @@ class ContextAPIRouter:
         memory_processor: Any | None = None,
         tiered_router: Any | None = None,
         tool_governor: Any | None = None,
+        runtime_health_checker: Any | None = None,
     ) -> None:
         self._aggregator = aggregator
+        self._llm_adapter = llm_adapter
         self._compression = compression_router or CompressionStrategyRouter(
             llm_adapter=llm_adapter
         )
@@ -65,6 +67,7 @@ class ContextAPIRouter:
         self._memory_processor = memory_processor
         self._tiered_router = tiered_router
         self._tool_governor = tool_governor
+        self._runtime_health_checker = runtime_health_checker
 
     async def handle(
         self,

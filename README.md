@@ -44,6 +44,7 @@ bash scripts/setup-openclaw.sh
 > bash scripts/start-all.sh              # 启动 pgvector（如适用）+ ContextAgent
 > bash scripts/stop-all.sh               # 停止 ContextAgent + pgvector（如适用）
 > bash scripts/restart-all.sh            # 重启全部本地服务
+> bash scripts/health-check.sh           # 执行运行态健康检查
 > ```
 >
 > 若当前 `openJiuwen` 后端不是 `pgvector`，`start-all.sh` / `stop-all.sh` / `restart-all.sh` 会自动跳过本地 pgvector 管理；`restart-pgvector.sh` 会直接提示当前后端不适用。
@@ -295,7 +296,13 @@ curl -X POST http://localhost:8080/context \
 
 # 健康检查
 curl http://localhost:8080/health
+
+# 或直接使用仓库脚本（会输出分项组件状态，并在 degraded 时返回非 0）
+bash scripts/health-check.sh
+make health-check
 ```
+
+`/health` 现在除了返回服务版本与 uptime，还会给出 `contextagent`、`pgvector`、`llm`、`embedding` 四类组件的分项检查结果；未配置的组件会标记为 `skipped`，已配置但探测失败的组件会标记为 `degraded`。
 
 完整 API 文档：启动后访问 `http://localhost:8080/docs`
 

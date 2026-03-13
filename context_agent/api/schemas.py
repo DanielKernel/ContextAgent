@@ -46,6 +46,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "0.1.0"
     uptime_s: float = 0.0
+    components: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class WriteRequest(BaseModel):

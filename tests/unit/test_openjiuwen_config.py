@@ -19,6 +19,7 @@ from context_agent.config.openjiuwen import (
     resolve_openjiuwen_config_path,
 )
 from context_agent.config.settings import Settings
+from context_agent.core.monitoring.runtime_health import RuntimeDependencyHealthChecker
 from context_agent.utils.errors import ContextAgentError, ErrorCode
 
 
@@ -57,6 +58,7 @@ def test_build_default_api_router_without_openjiuwen_config():
     assert router._aggregator._ltm is None
     assert router._working_memory is not None
     assert router._memory_orchestrator is None
+    assert isinstance(router._runtime_health_checker, RuntimeDependencyHealthChecker)
 
 
 def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path):
@@ -77,6 +79,7 @@ def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path)
     assert router._working_memory is not None
     assert router._memory_orchestrator is not None
     assert router._memory_processor is not None
+    assert isinstance(router._runtime_health_checker, RuntimeDependencyHealthChecker)
 
 
 def test_build_default_api_router_wires_llm_adapter(monkeypatch):

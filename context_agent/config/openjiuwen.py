@@ -21,6 +21,7 @@ from context_agent.config.settings import (
     Settings,
     get_settings,
 )
+from context_agent.core.monitoring.runtime_health import RuntimeDependencyHealthChecker
 from context_agent.core.memory.async_processor import AsyncMemoryProcessor
 from context_agent.core.memory.orchestrator import MemoryOrchestrator
 from context_agent.core.memory.working_memory import WorkingMemoryManager
@@ -512,6 +513,8 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     runtime_settings = settings or get_settings()
     aggregator_kwargs: dict[str, Any] = {}
     router_kwargs: dict[str, Any] = {}
+    llm_adapter: HttpLLMAdapter | None = None
+    openjiuwen_config: dict[str, Any] | None = None
     working_memory = WorkingMemoryManager()
     aggregator_kwargs["working_memory"] = working_memory
     router_kwargs["working_memory"] = working_memory
@@ -521,6 +524,9 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     )
 
     if resolved_openjiuwen_config is not None:
+        openjiuwen_config = _expand_env_placeholders(
+            load_openjiuwen_config(resolved_openjiuwen_config)
+        )
         try:
             ltm_adapter = build_openjiuwen_ltm_adapter(
                 resolved_openjiuwen_config
@@ -555,6 +561,12 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     llm_adapter = build_default_llm_adapter(runtime_settings)
     if llm_adapter is not None:
         router_kwargs["llm_adapter"] = llm_adapter
+    router_kwargs["runtime_health_checker"] = RuntimeDependencyHealthChecker(
+        settings=runtime_settings,
+        openjiuwen_config_path=resolved_openjiuwen_config,
+        openjiuwen_config=openjiuwen_config,
+        llm_adapter=llm_adapter,
+    )
 
     return ContextAPIRouter(
         aggregator=ContextAggregator(**aggregator_kwargs),

@@ -1,4 +1,4 @@
-.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart upgrade setup-openclaw uninstall-openclaw
+.PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart upgrade setup-openclaw uninstall-openclaw health-check
 
 PYTHON3 := python3
 VENV_DIR := .venv
@@ -85,3 +85,7 @@ setup-openclaw:
 ## 移除 OpenClaw 对接
 uninstall-openclaw:
 	bash scripts/setup-openclaw.sh --uninstall
+
+## 执行服务健康检查
+health-check:
+	bash scripts/health-check.sh

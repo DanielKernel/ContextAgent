@@ -14,6 +14,7 @@
 
 - `tests/unit/test_settings_config.py`：验证 `config/context_agent.yaml` 的分段配置加载与环境变量覆盖。
 - `tests/unit/test_openjiuwen_config.py`：验证 openJiuwen 配置发现、装配与降级行为。
+- `tests/unit/test_http_handler_health.py`：验证 `/health` 运行态依赖检查输出。
 - `tests/unit/test_compression_router.py`：验证压缩路由与策略 fallback。
 - `tests/unit/strategies/`：验证压缩策略注册和具体策略行为。
 - `tests/integration/test_e2e_pipeline.py`：验证从聚合到压缩输出的主链路。
