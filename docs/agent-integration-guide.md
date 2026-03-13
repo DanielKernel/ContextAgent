@@ -8,15 +8,16 @@
 
 ContextAgent 现在推荐始终维护两份正式配置：
 
-- `config/context_agent.yaml`
-- `config/openjiuwen.yaml`
+- 运行态配置：`.local/config/context_agent.yaml`
+- 运行态配置：`.local/config/openjiuwen.yaml`
 
 职责边界如下：
 
 | 配置文件 | 负责内容 |
 | --- | --- |
-| `config/context_agent.yaml` | ContextAgent 自身的服务、HTTP、Redis、S3、压缩 LLM、预算、异步记忆、观测、认证配置 |
-| `config/openjiuwen.yaml` | openJiuwen 的 LLM、embedding、向量库、长期记忆策略配置 |
+| `.local/config/context_agent.yaml` | ContextAgent 运行态配置；安装/升级时默认写入这里，避免被 `git pull` 覆盖 |
+| `.local/config/openjiuwen.yaml` | openJiuwen 运行态配置；由 ContextAgent 配置中的相对路径自动解析 |
+| `config/context_agent.yaml` / `config/openjiuwen.yaml` | 仓库静态模板与发布基线，不建议直接承载线上动态配置 |
 
 ContextAgent **只通过 openJiuwen 配置接入向量数据库**。不要把 pgvector、qdrant、milvus 的连接逻辑直接写入业务代码。
 
@@ -26,16 +27,17 @@ ContextAgent **只通过 openJiuwen 配置接入向量数据库**。不要把 pg
 
 默认启动链路：
 
-1. 自动读取 `config/context_agent.yaml`
-2. 再读取其中 `integrations.openjiuwen.config_path` 指向的 openJiuwen 配置
-3. 装配 `OpenJiuwenLTMAdapter`
-4. 在 openJiuwen 可用时启用长期记忆；不可用时降级为 working-memory-only
+1. 优先读取 `.local/config/context_agent.yaml`
+2. 再读取其中 `integrations.openjiuwen.config_path` 指向的 `.local/config/openjiuwen.yaml`
+3. 若运行态配置不存在，才回退到仓库内 `config/` 模板
+4. 装配 `OpenJiuwenLTMAdapter`
+5. 在 openJiuwen 可用时启用长期记忆；不可用时降级为 working-memory-only
 
-建议把两份配置放在同一个 `config/` 目录下，这样默认值就可以直接工作。
+建议把运行态配置放在同一个 `.local/config/` 目录下，这样 `git pull`、重新安装或切换分支时都不会覆盖线上动态配置。
 
 ---
 
-## 3. `config/context_agent.yaml` 分段配置
+## 3. `.local/config/context_agent.yaml` 分段配置
 
 当前正式结构如下：
 
@@ -192,7 +194,7 @@ auth:
 
 ---
 
-## 4. `config/openjiuwen.yaml` 结构与职责
+## 4. `.local/config/openjiuwen.yaml` 结构与职责
 
 当前正式示例：
 
@@ -264,8 +266,8 @@ memory_config:
 
 正式默认配置：
 
-- `config/context_agent.yaml`
-- `config/openjiuwen.yaml`
+- 运行态配置：`.local/config/context_agent.yaml`
+- 运行态配置：`.local/config/openjiuwen.yaml`
 
 按后端分类的标准样例：
 
@@ -278,7 +280,7 @@ memory_config:
 
 建议流程：
 
-1. 先以 `config/` 下正式配置启动
+1. 先以 `.local/config/` 下运行态配置启动
 2. 如需切换向量后端，再参考 `examples/configs/<backend>/`
 3. 修改完成后保持 `context_agent.yaml` 和 `openjiuwen.yaml` 同目录
 
@@ -304,8 +306,8 @@ bash scripts/install.sh --start
 安装脚本会：
 
 1. 确保 `.venv` 可用
-2. 生成或保留 `config/context_agent.yaml`
-3. 生成或保留 `config/openjiuwen.yaml`
+2. 生成或保留 `.local/config/context_agent.yaml`
+3. 生成或保留 `.local/config/openjiuwen.yaml`
 4. 默认按 pgvector 进行初始化
 
 ### 6.3 升级脚本
@@ -377,7 +379,7 @@ HTTP / OpenClaw ingest
 
 先确认：
 
-- 文件路径是 `config/context_agent.yaml`
+- 文件路径优先看 `.local/config/context_agent.yaml`
 - `integrations.openjiuwen.config_path` 是正确的相对或绝对路径
 - YAML 缩进正确
 
@@ -385,7 +387,7 @@ HTTP / OpenClaw ingest
 
 先检查：
 
-- `config/openjiuwen.yaml` 是否存在
+- `.local/config/openjiuwen.yaml` 是否存在
 - `vector_store.backend` 是否填写正确
 - `llm_config` / `embedding_config` 是否具备真实可用的凭据
 
@@ -401,8 +403,8 @@ HTTP / OpenClaw ingest
 
 ## 10. 推荐阅读顺序
 
-1. 先看 `config/context_agent.yaml`
-2. 再看 `config/openjiuwen.yaml`
+1. 先看 `.local/config/context_agent.yaml`
+2. 再看 `.local/config/openjiuwen.yaml`
 3. 然后看 `examples/configs/<backend>/`
 4. 如需接入 OpenClaw，再看 `docs/openclaw-integration.md`
 5. 如需理解测试范围，再看 `tests/README.md`

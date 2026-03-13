@@ -128,6 +128,46 @@ def test_resolve_openjiuwen_config_path_uses_env(monkeypatch, tmp_path):
     assert resolve_openjiuwen_config_path() == config_path.resolve()
 
 
+def test_resolve_openjiuwen_config_path_prefers_runtime_default(monkeypatch, tmp_path):
+    runtime_config = tmp_path / ".local" / "config" / "openjiuwen.yaml"
+    runtime_config.parent.mkdir(parents=True)
+    runtime_config.write_text("user_id: runtime\n", encoding="utf-8")
+    repo_template = tmp_path / "config" / "openjiuwen.yaml"
+    repo_template.parent.mkdir()
+    repo_template.write_text("user_id: template\n", encoding="utf-8")
+
+    monkeypatch.delenv("CA_OPENJIUWEN_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.DEFAULT_OPENJIUWEN_CONFIG_PATH",
+        runtime_config,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.REPOSITORY_OPENJIUWEN_TEMPLATE_PATH",
+        repo_template,
+    )
+
+    assert resolve_openjiuwen_config_path() == runtime_config.resolve()
+
+
+def test_resolve_openjiuwen_config_path_falls_back_to_repo_template(monkeypatch, tmp_path):
+    runtime_config = tmp_path / ".local" / "config" / "openjiuwen.yaml"
+    repo_template = tmp_path / "config" / "openjiuwen.yaml"
+    repo_template.parent.mkdir()
+    repo_template.write_text("user_id: template\n", encoding="utf-8")
+
+    monkeypatch.delenv("CA_OPENJIUWEN_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.DEFAULT_OPENJIUWEN_CONFIG_PATH",
+        runtime_config,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.REPOSITORY_OPENJIUWEN_TEMPLATE_PATH",
+        repo_template,
+    )
+
+    assert resolve_openjiuwen_config_path() == repo_template.resolve()
+
+
 def test_instantiate_long_term_memory_with_config_keyword():
     class FakeLongTermMemory:
         def __init__(self, config):

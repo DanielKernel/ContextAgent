@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 BACKEND="pgvector"
-CONFIG_PATH="$PROJECT_DIR/config/openjiuwen.yaml"
+CONFIG_PATH="$PROJECT_DIR/.local/config/openjiuwen.yaml"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()    { echo -e "${BLUE}[INFO]${NC}  $*"; }
@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       echo "用法: bash scripts/setup-vector-backend.sh [--backend BACKEND] [--config PATH]"
       echo "  --backend BACKEND   向量库后端（默认 pgvector，可选 qdrant / milvus）"
-      echo "  --config PATH       openJiuwen 配置文件输出路径（默认 config/openjiuwen.yaml）"
+      echo "  --config PATH       openJiuwen 运行态配置文件输出路径（默认 .local/config/openjiuwen.yaml）"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac

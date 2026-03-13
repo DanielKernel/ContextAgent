@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import inspect
 import importlib
+import inspect
+import json
 import os
 import threading
 from pathlib import Path
@@ -15,7 +15,11 @@ import yaml
 
 from context_agent.adapters.ltm_adapter import OpenJiuwenLTMAdapter
 from context_agent.api.router import ContextAPIRouter
-from context_agent.config.settings import Settings, get_settings
+from context_agent.config.settings import (
+    DEFAULT_RUNTIME_CONFIG_DIR,
+    Settings,
+    get_settings,
+)
 from context_agent.core.memory.async_processor import AsyncMemoryProcessor
 from context_agent.core.memory.orchestrator import MemoryOrchestrator
 from context_agent.core.memory.working_memory import WorkingMemoryManager
@@ -25,7 +29,8 @@ from context_agent.utils.logging import get_logger
 
 logger = get_logger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OPENJIUWEN_CONFIG_PATH = PROJECT_ROOT / "config" / "openjiuwen.yaml"
+DEFAULT_OPENJIUWEN_CONFIG_PATH = DEFAULT_RUNTIME_CONFIG_DIR / "openjiuwen.yaml"
+REPOSITORY_OPENJIUWEN_TEMPLATE_PATH = PROJECT_ROOT / "config" / "openjiuwen.yaml"
 
 
 def _expand_env_placeholders(value: Any) -> Any:
@@ -425,14 +430,18 @@ async def _bootstrap_long_term_memory(ltm: Any, config: dict[str, Any]) -> Any:
 
 
 def resolve_openjiuwen_config_path(explicit_path: str | Path | None = None) -> Path | None:
-    """Resolve the openJiuwen config path from explicit value, env, or repo default."""
+    """Resolve the openJiuwen config path from explicit value, env, runtime default, or repo fallback."""
     candidate_path = explicit_path or os.getenv("CA_OPENJIUWEN_CONFIG_PATH")
     if candidate_path:
         candidate = Path(candidate_path).expanduser()
         return candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
 
-    if DEFAULT_OPENJIUWEN_CONFIG_PATH.is_file():
-        return DEFAULT_OPENJIUWEN_CONFIG_PATH.resolve()
+    for candidate in (
+        DEFAULT_OPENJIUWEN_CONFIG_PATH,
+        REPOSITORY_OPENJIUWEN_TEMPLATE_PATH,
+    ):
+        if candidate.is_file():
+            return candidate.resolve()
     return None
 
 

@@ -24,11 +24,11 @@ bash scripts/setup-openclaw.sh
 
 就这两条命令。服务默认监听 `http://localhost:8000`，接入后 OpenClaw 会自动使用 ContextAgent 进行上下文管理。
 
-> ContextAgent 现在默认随代码发布两份标准配置：`config/context_agent.yaml` 和 `config/openjiuwen.yaml`。启动时会先读取 ContextAgent 配置，再按其中的 `integrations.openjiuwen.config_path` 自动加载 openJiuwen 配置。
+> ContextAgent 现在默认随代码发布两份标准配置：仓库内静态模板 `config/context_agent.yaml` 和 `config/openjiuwen.yaml`。启动时默认优先读取运行态配置 `.local/config/context_agent.yaml`，再按其中的 `integrations.openjiuwen.config_path` 自动加载 `.local/config/openjiuwen.yaml`；只有运行态配置不存在时才回退到仓库内模板。
 
 > ContextAgent **只通过 openJiuwen 配置对接向量数据库**，不会在业务代码中直连向量库。
 
-> 重装/重新初始化向量后端时，安装脚本会保留现有 `config/openjiuwen.yaml` 中的 `llm_config`、`embedding_config`、`memory_config` 等已有配置，只更新当前后端所需的 `vector_store` 配置。
+> 重装/重新初始化向量后端时，安装脚本会保留现有运行态 `.local/config/openjiuwen.yaml` 中的 `llm_config`、`embedding_config`、`memory_config` 等已有配置，只更新当前后端所需的 `vector_store` 配置。
 
 > **更多选项：**
 > ```bash
@@ -54,7 +54,7 @@ python3 -m venv .venv
 # 3) 激活虚拟环境（可选，便于手动执行命令）
 source .venv/bin/activate
 
-# 4) 直接启动服务（默认自动读取 config/context_agent.yaml -> config/openjiuwen.yaml）
+# 4) 直接启动服务（默认自动读取 .local/config/context_agent.yaml -> .local/config/openjiuwen.yaml）
 .venv/bin/python3 -m uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080
 ```
 
@@ -82,12 +82,12 @@ bash scripts/install.sh --vector-backend qdrant
 bash scripts/install.sh --vector-backend milvus
 ```
 
-如果 `config/openjiuwen.yaml` 已存在，脚本会先生成 `.bak` 备份，再在保留已有 LLM / Embedding / Memory 配置的前提下，仅替换与当前向量后端相关的 `vector_store` 段。
+如果运行态 `.local/config/openjiuwen.yaml` 已存在，脚本会先生成 `.bak` 备份，再在保留已有 LLM / Embedding / Memory 配置的前提下，仅替换与当前向量后端相关的 `vector_store` 段。
 
 正式默认配置见：
 
-- `config/context_agent.yaml`
-- `config/openjiuwen.yaml`
+- 运行态配置：`.local/config/context_agent.yaml`、`.local/config/openjiuwen.yaml`
+- 仓库静态模板：`config/context_agent.yaml`、`config/openjiuwen.yaml`
 
 标准命名的示例场景见：
 
@@ -109,7 +109,7 @@ bash scripts/upgrade.sh
 
 升级脚本默认会：
 
-1. 备份 `config/context_agent.yaml`、`config/openjiuwen.yaml`、`.env`
+1. 备份运行态配置 `.local/config/context_agent.yaml`、`.local/config/openjiuwen.yaml` 以及 `.env`
 2. 对 `pgvector` 执行逻辑备份（若能找到 `pg_dump`）
 3. 保留 PostgreSQL 数据目录和 `ltm_memory` 历史记忆
 4. 只做幂等配置补齐和非破坏性 schema 迁移
@@ -273,8 +273,8 @@ make venv-run
 python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port 8080
 
 # 如需覆盖默认配置路径，也可以显式指定
-export CA_CONTEXT_AGENT_CONFIG_PATH=config/context_agent.yaml
-export CA_OPENJIUWEN_CONFIG_PATH=config/openjiuwen.yaml
+export CA_CONTEXT_AGENT_CONFIG_PATH=.local/config/context_agent.yaml
+export CA_OPENJIUWEN_CONFIG_PATH=.local/config/openjiuwen.yaml
 python3 -m uvicorn context_agent.api.http_handler:app --host 0.0.0.0 --port 8080
 
 # 检索上下文

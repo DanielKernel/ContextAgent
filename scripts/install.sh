@@ -9,9 +9,9 @@
 #    --vector-backend BACKEND
 #                   openJiuwen 向量库后端（默认 pgvector，可选 qdrant / milvus）
 #    --context-agent-config PATH
-#                   ContextAgent 配置文件路径（默认 ./config/context_agent.yaml）
+#                   ContextAgent 配置文件路径（默认 ./.local/config/context_agent.yaml）
 #    --openjiuwen-config PATH
-#                   openJiuwen 配置文件路径（默认 ./config/openjiuwen.yaml）
+#                   openJiuwen 配置文件路径（默认 ./.local/config/openjiuwen.yaml）
 #    --help         显示帮助
 # =============================================================================
 set -euo pipefail
@@ -22,8 +22,9 @@ VENV_DIR="$PROJECT_DIR/.venv"
 PORT=8000
 START_SERVICE=false
 VECTOR_BACKEND="pgvector"
-CONTEXT_AGENT_CONFIG_PATH="$PROJECT_DIR/config/context_agent.yaml"
-OPENJIUWEN_CONFIG_PATH="$PROJECT_DIR/config/openjiuwen.yaml"
+RUNTIME_CONFIG_DIR="$PROJECT_DIR/.local/config"
+CONTEXT_AGENT_CONFIG_PATH="$RUNTIME_CONFIG_DIR/context_agent.yaml"
+OPENJIUWEN_CONFIG_PATH="$RUNTIME_CONFIG_DIR/openjiuwen.yaml"
 LOG_FILE="$PROJECT_DIR/context_agent.log"
 PID_FILE="$PROJECT_DIR/context_agent.pid"
 ENV_FILE="$PROJECT_DIR/.env"
@@ -49,8 +50,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --start       安装后自动在后台启动服务"
       echo "  --port PORT   服务端口（默认 8000）"
       echo "  --vector-backend BACKEND   向量库后端（默认 pgvector，可选 qdrant / milvus）"
-      echo "  --context-agent-config PATH   ContextAgent 配置文件输出路径"
-      echo "  --openjiuwen-config PATH   openJiuwen 配置文件输出路径"
+      echo "  --context-agent-config PATH   ContextAgent 运行态配置文件输出路径"
+      echo "  --openjiuwen-config PATH   openJiuwen 运行态配置文件输出路径"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac

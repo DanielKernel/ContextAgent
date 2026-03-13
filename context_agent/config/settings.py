@@ -14,7 +14,9 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONTEXT_AGENT_CONFIG_PATH = PROJECT_ROOT / "config" / "context_agent.yaml"
+DEFAULT_RUNTIME_CONFIG_DIR = PROJECT_ROOT / ".local" / "config"
+DEFAULT_CONTEXT_AGENT_CONFIG_PATH = DEFAULT_RUNTIME_CONFIG_DIR / "context_agent.yaml"
+REPOSITORY_CONTEXT_AGENT_TEMPLATE_PATH = PROJECT_ROOT / "config" / "context_agent.yaml"
 
 _SECTION_FIELD_MAP: dict[tuple[str, ...], str] = {
     ("service", "name"): "service_name",
@@ -58,7 +60,8 @@ def resolve_context_agent_config_path(explicit_path: str | None = None) -> Path 
     1. Explicit function argument
     2. `CA_CONTEXT_AGENT_CONFIG_PATH`
     3. `CA_SETTINGS_PATH` (compatibility alias)
-    4. Repository default `config/context_agent.yaml`
+    4. Runtime default `.local/config/context_agent.yaml`
+    5. Repository template fallback `config/context_agent.yaml`
     """
 
     raw_path = (
@@ -70,8 +73,12 @@ def resolve_context_agent_config_path(explicit_path: str | None = None) -> Path 
         candidate = Path(raw_path).expanduser()
         return candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
 
-    if DEFAULT_CONTEXT_AGENT_CONFIG_PATH.is_file():
-        return DEFAULT_CONTEXT_AGENT_CONFIG_PATH.resolve()
+    for candidate in (
+        DEFAULT_CONTEXT_AGENT_CONFIG_PATH,
+        REPOSITORY_CONTEXT_AGENT_TEMPLATE_PATH,
+    ):
+        if candidate.is_file():
+            return candidate.resolve()
     return None
 
 

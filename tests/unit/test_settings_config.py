@@ -78,3 +78,45 @@ integrations:
     settings = Settings()
 
     assert settings.openjiuwen_config_path == str((tmp_path / "shared" / "openjiuwen.yaml").resolve())
+
+
+def test_resolve_context_agent_config_path_prefers_runtime_default(monkeypatch, tmp_path):
+    runtime_config = tmp_path / ".local" / "config" / "context_agent.yaml"
+    runtime_config.parent.mkdir(parents=True)
+    runtime_config.write_text("http:\n  port: 8080\n", encoding="utf-8")
+    repo_template = tmp_path / "config" / "context_agent.yaml"
+    repo_template.parent.mkdir()
+    repo_template.write_text("http:\n  port: 9000\n", encoding="utf-8")
+
+    monkeypatch.delenv("CA_CONTEXT_AGENT_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("CA_SETTINGS_PATH", raising=False)
+    monkeypatch.setattr(
+        "context_agent.config.settings.DEFAULT_CONTEXT_AGENT_CONFIG_PATH",
+        runtime_config,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.settings.REPOSITORY_CONTEXT_AGENT_TEMPLATE_PATH",
+        repo_template,
+    )
+
+    assert resolve_context_agent_config_path() == runtime_config.resolve()
+
+
+def test_resolve_context_agent_config_path_falls_back_to_repo_template(monkeypatch, tmp_path):
+    runtime_config = tmp_path / ".local" / "config" / "context_agent.yaml"
+    repo_template = tmp_path / "config" / "context_agent.yaml"
+    repo_template.parent.mkdir()
+    repo_template.write_text("http:\n  port: 9000\n", encoding="utf-8")
+
+    monkeypatch.delenv("CA_CONTEXT_AGENT_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("CA_SETTINGS_PATH", raising=False)
+    monkeypatch.setattr(
+        "context_agent.config.settings.DEFAULT_CONTEXT_AGENT_CONFIG_PATH",
+        runtime_config,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.settings.REPOSITORY_CONTEXT_AGENT_TEMPLATE_PATH",
+        repo_template,
+    )
+
+    assert resolve_context_agent_config_path() == repo_template.resolve()

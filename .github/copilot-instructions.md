@@ -46,7 +46,7 @@ python3 -m pytest tests/unit
 
 ContextAgent is a FastAPI service that exposes a single context-management pipeline. The module-level ASGI app in `context_agent/api/http_handler.py` calls `build_default_api_router()` from `context_agent/config/openjiuwen.py`, so startup wiring matters as much as the request handlers.
 
-The default runtime always creates `WorkingMemoryManager` first. If `config/context_agent.yaml` resolves an `integrations.openjiuwen.config_path` (or `CA_OPENJIUWEN_CONFIG_PATH`) and openJiuwen can be initialized, startup adds:
+The default runtime always creates `WorkingMemoryManager` first. If `.local/config/context_agent.yaml` resolves an `integrations.openjiuwen.config_path` (or `CA_OPENJIUWEN_CONFIG_PATH`) and openJiuwen can be initialized, startup adds:
 
 - `OpenJiuwenLTMAdapter` as the long-term memory port
 - `AsyncMemoryProcessor` for queued long-term writes
@@ -71,7 +71,7 @@ Retrieval is split across two layers:
 
 ### Configuration is split across two YAML files
 
-`context_agent/config/settings.py` flattens segmented `config/context_agent.yaml` sections such as `service`, `http`, `redis`, `storage`, `llm`, `integrations`, `budgets`, `memory`, `observability`, and `auth` into `Settings`. That file then points to `config/openjiuwen.yaml` for vector-store and openJiuwen memory configuration. Do not bypass this by wiring vector DB settings directly into business code.
+`context_agent/config/settings.py` flattens segmented runtime config sections from `.local/config/context_agent.yaml` into `Settings`, falling back to repository `config/context_agent.yaml` only as a template. That file then points to `.local/config/openjiuwen.yaml` (or an explicit override) for vector-store and openJiuwen memory configuration. Do not bypass this by wiring vector DB settings directly into business code.
 
 ### openJiuwen is the only long-term memory integration boundary
 

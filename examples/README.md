@@ -7,7 +7,7 @@
 - 大多数 `.py` 示例都可以直接运行：`python examples/<file>.py`
 - 这些 Python 示例默认以 **stub / in-memory** 方式演示能力，不要求先完成 openJiuwen 安装
 - `examples/configs/<backend>/` 下提供标准命名的配置样例，每个场景目录都直接包含 `context_agent.yaml` 和 `openjiuwen.yaml`
-- 如果你想接入真实长期记忆，优先使用正式配置 `config/context_agent.yaml` 与 `config/openjiuwen.yaml`；示例目录主要用于理解不同后端/场景如何填写
+- 如果你想接入真实长期记忆，优先使用运行态配置 `.local/config/context_agent.yaml` 与 `.local/config/openjiuwen.yaml`；仓库 `config/` 目录更适合作为静态模板，示例目录主要用于理解不同后端/场景如何填写
 
 ## 示例总览
 
@@ -188,7 +188,7 @@
 
 如果你要接入真实长期记忆：
 
-1. 先查看正式默认配置：`config/context_agent.yaml` 与 `config/openjiuwen.yaml`
+1. 先查看运行态默认配置：`.local/config/context_agent.yaml` 与 `.local/config/openjiuwen.yaml`（不存在时可参考仓库 `config/` 模板）
 2. 如果需要切换后端，再参考 `examples/configs/<backend>/` 下的标准样例
 3. 需要覆盖路径时，可设置 `CA_CONTEXT_AGENT_CONFIG_PATH` / `CA_OPENJIUWEN_CONFIG_PATH`
 4. 通过 `context_agent.config.openjiuwen.build_default_api_router()` 或你自己的启动入口装配
