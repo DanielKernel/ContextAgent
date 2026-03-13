@@ -10,6 +10,7 @@ from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
     _bootstrap_long_term_memory,
     _build_db_store,
+    _build_embedding_model,
     _build_model_configs,
     _expand_env_placeholders,
     _instantiate_long_term_memory,
@@ -479,6 +480,45 @@ def test_build_model_configs_preserves_explicit_ssl_settings(monkeypatch):
 
     assert client_config.kwargs["verify_ssl"] is False
     assert client_config.kwargs["ssl_cert"] is None
+
+
+def test_build_embedding_model_uses_openai_client_for_openai_provider(monkeypatch):
+    class FakeEmbeddingConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeOpenAIEmbedding:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_import(module_name, symbol_name):
+        if symbol_name == "EmbeddingConfig":
+            return FakeEmbeddingConfig
+        if symbol_name == "OpenAIEmbedding":
+            return FakeOpenAIEmbedding
+        raise AssertionError((module_name, symbol_name))
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+
+    embedding = _build_embedding_model(
+        {
+            "embedding_config": {
+                "provider": "openai",
+                "model": "text-embedding-v4",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "secret",
+                "dimension": 1024,
+                "batch_size": 10,
+            }
+        }
+    )
+
+    assert isinstance(embedding, FakeOpenAIEmbedding)
+    assert embedding.kwargs["dimension"] == 1024
+    assert embedding.kwargs["max_batch_size"] == 10
 
 
 @pytest.mark.asyncio

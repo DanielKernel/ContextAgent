@@ -304,20 +304,37 @@ def _build_embedding_model(config: dict[str, Any]) -> Any | None:
         "openjiuwen.core.foundation.store.base_embedding",
         "EmbeddingConfig",
     )
-    APIEmbedding = _import_openjiuwen_symbol(
-        "openjiuwen.core.retrieval.embedding.api_embedding",
-        "APIEmbedding",
-    )
     embed_config = EmbeddingConfig(
         model_name=embedding_config.get("model", ""),
         base_url=embedding_config.get("base_url", ""),
         api_key=embedding_config.get("api_key"),
     )
+    provider = str(embedding_config.get("provider", "openai")).strip().lower()
+    embedding_timeout = embedding_config.get("timeout", 60)
+    embedding_retries = embedding_config.get("max_retries", 3)
+    embedding_batch_size = embedding_config.get("batch_size", 8)
+    if provider in {"openai", "openrouter", "dashscope", "siliconflow"}:
+        OpenAIEmbedding = _import_openjiuwen_symbol(
+            "openjiuwen.core.retrieval.embedding.openai_embedding",
+            "OpenAIEmbedding",
+        )
+        return OpenAIEmbedding(
+            config=embed_config,
+            timeout=embedding_timeout,
+            max_retries=embedding_retries,
+            max_batch_size=embedding_batch_size,
+            dimension=embedding_config.get("dimension"),
+        )
+
+    APIEmbedding = _import_openjiuwen_symbol(
+        "openjiuwen.core.retrieval.embedding.api_embedding",
+        "APIEmbedding",
+    )
     return APIEmbedding(
         config=embed_config,
-        timeout=embedding_config.get("timeout", 60),
-        max_retries=embedding_config.get("max_retries", 3),
-        max_batch_size=embedding_config.get("batch_size", 8),
+        timeout=embedding_timeout,
+        max_retries=embedding_retries,
+        max_batch_size=embedding_batch_size,
     )
 
 
