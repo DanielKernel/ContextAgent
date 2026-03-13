@@ -192,13 +192,13 @@ while IFS=$'\t' read -r record_type col1 col2 col3 col4; do
     case "$component_status" in
       ok) success "$message" ;;
       skipped)
-        if [[ "$configured" == "True" ]]; then
+        if [[ "$configured" == "True" || "$detail" == *"running service process"* ]]; then
           warn "$message"
         else
           info "$message"
-          if [[ "$detail" == *"unresolved in the running service process"* ]]; then
-            warn "${component_name}: 当前 shell 中若已更新相关环境变量，请重启 ContextAgent 以重新加载配置"
-          fi
+        fi
+        if [[ "$detail" == *"running service process"* ]]; then
+          warn "${component_name}: 当前 shell 中若已更新相关环境变量，请重启 ContextAgent 以重新加载配置"
         fi
         ;;
       degraded)

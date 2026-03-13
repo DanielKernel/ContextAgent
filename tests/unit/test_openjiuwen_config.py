@@ -349,7 +349,6 @@ def test_expand_env_placeholders_recursively(monkeypatch):
     assert expanded["llm_config"]["api_key"] == "secret"
     assert expanded["nested"] == ["secret"]
 
-
 def test_normalize_async_dsn_for_postgres():
     dsn = "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
 
