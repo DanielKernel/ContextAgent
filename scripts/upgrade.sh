@@ -468,7 +468,7 @@ if [[ "$SHOULD_START" == true ]]; then
   info "等待服务健康检查..."
   STARTED=false
   for _ in $(seq 1 20); do
-    if bash "$SCRIPT_DIR/health-check.sh" --url "http://127.0.0.1:${HTTP_PORT}/health" --timeout 2 >/dev/null 2>&1; then
+    if bash "$SCRIPT_DIR/health-check.sh" --url "http://127.0.0.1:${HTTP_PORT}/health" --timeout 2 --allow-degraded-components "llm,embedding" >/dev/null 2>&1; then
       success "升级成功，服务已恢复：http://127.0.0.1:${HTTP_PORT}"
       echo "  升级备份：$BACKUP_DIR"
       echo "  回滚配置：bash scripts/upgrade.sh --rollback $BACKUP_DIR"
@@ -499,7 +499,7 @@ if [[ "$SHOULD_START" == true ]]; then
   ROLLBACK_PID=$!
   echo "$ROLLBACK_PID" > "$PID_FILE"
   for _ in $(seq 1 20); do
-    if bash "$SCRIPT_DIR/health-check.sh" --url "http://127.0.0.1:${HTTP_PORT}/health" --timeout 2 >/dev/null 2>&1; then
+    if bash "$SCRIPT_DIR/health-check.sh" --url "http://127.0.0.1:${HTTP_PORT}/health" --timeout 2 --allow-degraded-components "llm,embedding" >/dev/null 2>&1; then
       die "升级后的服务未通过健康检查，配置已回滚并恢复启动。数据库逻辑备份保留在：$BACKUP_DIR/postgres"
     fi
     if ! kill -0 "$ROLLBACK_PID" 2>/dev/null; then

@@ -34,6 +34,10 @@ def _known_attr(obj: object | None, name: str) -> object | None:
     return values.get(name)
 
 
+def _is_unresolved_placeholder(value: object) -> bool:
+    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
+
+
 @dataclass
 class ComponentHealthReport:
     name: str
@@ -237,6 +241,16 @@ class RuntimeDependencyHealthChecker:
         )
 
     async def _check_llm(self, api_router: object | None) -> ComponentHealthReport:
+        if _is_unresolved_placeholder(self._settings.llm_base_url) or _is_unresolved_placeholder(
+            self._settings.llm_model
+        ):
+            return ComponentHealthReport(
+                name="llm",
+                status="skipped",
+                detail="default LLM config still contains unresolved environment placeholders",
+                configured=False,
+            )
+
         adapter, owns_adapter = self._resolve_llm_adapter(api_router)
         if adapter is None:
             return ComponentHealthReport(
@@ -286,6 +300,15 @@ class RuntimeDependencyHealthChecker:
                 name="embedding",
                 status="skipped",
                 detail="embedding model is not configured",
+                configured=False,
+            )
+        if _is_unresolved_placeholder(embedding_config.get("base_url")) or _is_unresolved_placeholder(
+            embedding_config.get("model")
+        ):
+            return ComponentHealthReport(
+                name="embedding",
+                status="skipped",
+                detail="embedding config still contains unresolved environment placeholders",
                 configured=False,
             )
 

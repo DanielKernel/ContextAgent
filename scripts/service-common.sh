@@ -142,6 +142,7 @@ run_contextagent_health_check() {
   bash "$SCRIPT_DIR/health-check.sh" \
     --url "$health_url" \
     --timeout "$timeout_seconds" \
+    --allow-degraded-components "llm,embedding" \
     >/dev/null 2>&1
 }
 

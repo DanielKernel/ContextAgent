@@ -108,3 +108,28 @@ async def test_runtime_health_checker_skips_unconfigured_embedding() -> None:
 
     assert report.components["embedding"].status == "skipped"
     assert report.components["embedding"].configured is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_checker_skips_unresolved_embedding_placeholders() -> None:
+    checker = RuntimeDependencyHealthChecker(
+        settings=Settings(openjiuwen_config_path=""),
+        openjiuwen_config={
+            "vector_store": {"backend": "pgvector"},
+            "embedding_config": {
+                "model": "${EMBED_MODEL}",
+                "base_url": "${EMBED_BASE_URL}",
+            },
+        },
+    )
+
+    report = await checker.check(
+        SimpleNamespace(
+            _aggregator=SimpleNamespace(_ltm=_HealthyLTM()),
+            _working_memory=object(),
+            _memory_processor=None,
+        )
+    )
+
+    assert report.components["embedding"].status == "skipped"
+    assert "unresolved environment placeholders" in report.components["embedding"].detail
