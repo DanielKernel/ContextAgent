@@ -10,6 +10,7 @@ import os
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
 
@@ -283,12 +284,41 @@ def _build_memory_scope_config(config: dict[str, Any]) -> Any:
 
 
 def _normalize_async_dsn(dsn: str) -> str:
+    def _rewrite_postgres_url(raw_dsn: str) -> str:
+        parts = urlsplit(raw_dsn)
+        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        rewritten_query: list[tuple[str, str]] = []
+        for key, value in query_pairs:
+            if key != "sslmode":
+                rewritten_query.append((key, value))
+                continue
+
+            normalized_value = value.strip().lower()
+            if normalized_value == "disable":
+                rewritten_query.append(("ssl", "false"))
+            elif normalized_value in {"require", "verify-ca", "verify-full"}:
+                rewritten_query.append(("ssl", "true"))
+            # `allow` / `prefer` are libpq-specific best-effort modes. asyncpg
+            # has no equivalent, so we drop them and let the driver defaults apply.
+
+        return urlunsplit(
+            (
+                "postgresql+asyncpg",
+                parts.netloc,
+                parts.path,
+                urlencode(rewritten_query),
+                parts.fragment,
+            )
+        )
+
+    if dsn.startswith("postgresql+asyncpg://"):
+        return _rewrite_postgres_url(dsn)
     if dsn.startswith("postgresql+"):
         return dsn
     if dsn.startswith("postgresql://"):
-        return dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return _rewrite_postgres_url(dsn)
     if dsn.startswith("postgres://"):
-        return dsn.replace("postgres://", "postgresql+asyncpg://", 1)
+        return _rewrite_postgres_url(dsn.replace("postgres://", "postgresql://", 1))
     if dsn.startswith("sqlite:///"):
         return dsn.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     return dsn
@@ -504,6 +534,17 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
             "constructor signature.",
             code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
             details={"reason": str(exc)},
+        ) from exc
+    except ContextAgentError:
+        raise
+    except Exception as exc:
+        raise ContextAgentError(
+            "Failed to bootstrap openJiuwen LongTermMemory stores.",
+            code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+            details={
+                "reason": str(exc),
+                "vector_backend": vector_backend,
+            },
         ) from exc
     return OpenJiuwenLTMAdapter(ltm=ltm, memory_config=config.get("memory_config"))
 

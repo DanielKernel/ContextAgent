@@ -18,7 +18,7 @@ embedding_config:
 
 vector_store:
   backend: pgvector
-  dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable
+  dsn: postgresql://postgres@127.0.0.1:55432/context_agent
   schema: public
   table_name: ltm_memory
   embedding_dimension: 3072

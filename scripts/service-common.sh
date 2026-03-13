@@ -315,7 +315,7 @@ start_contextagent() {
   diagnose_contextagent_start_failure "$pid"
 }
 
-find_linux_pg_bin_dir() {
+find_postgres_bin_dir() {
   local candidate version fallback_pg_bin_dir=""
 
   if [[ -n "${CA_PGVECTOR_BIN_DIR:-}" ]]; then
@@ -327,6 +327,14 @@ find_linux_pg_bin_dir() {
   if command -v initdb >/dev/null 2>&1; then
     echo "$(dirname "$(command -v initdb)")"
     return 0
+  fi
+
+  if command -v pg_ctl >/dev/null 2>&1 && command -v pg_isready >/dev/null 2>&1; then
+    candidate="$(dirname "$(command -v pg_ctl)")"
+    if [[ -x "$candidate/initdb" && -x "$candidate/psql" && -x "$candidate/createdb" ]]; then
+      echo "$candidate"
+      return 0
+    fi
   fi
 
   while IFS= read -r candidate; do
@@ -416,18 +424,7 @@ PY
   PGVECTOR_LOG_FILE="$PGVECTOR_ROOT/postgresql.log"
   PGVECTOR_SOCKET_DIR="$PGVECTOR_ROOT/socket"
 
-  case "$(uname -s)" in
-    Darwin)
-      command -v brew >/dev/null 2>&1 || die "未找到 brew，无法定位 PostgreSQL 二进制目录。"
-      PG_BIN_DIR="$(brew --prefix postgresql@17)/bin"
-      ;;
-    Linux)
-      PG_BIN_DIR="$(find_linux_pg_bin_dir)" || die "未找到 PostgreSQL 服务端二进制目录。"
-      ;;
-    *)
-      die "当前平台暂不支持 pgvector 服务管理：$(uname -s)"
-      ;;
-  esac
+  PG_BIN_DIR="$(find_postgres_bin_dir)" || die "未找到 PostgreSQL 服务端二进制目录。请设置 CA_PGVECTOR_BIN_DIR 或将 pg_ctl / initdb 加入 PATH。"
 
   PG_CTL_BIN="$PG_BIN_DIR/pg_ctl"
   PG_ISREADY_BIN="$PG_BIN_DIR/pg_isready"

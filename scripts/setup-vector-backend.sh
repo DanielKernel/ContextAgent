@@ -260,7 +260,7 @@ embedding_config:
 
 vector_store:
   backend: pgvector
-  dsn: postgresql://${pg_user}@127.0.0.1:${pg_port}/${pg_db_name}?sslmode=disable
+  dsn: postgresql://${pg_user}@127.0.0.1:${pg_port}/${pg_db_name}
   schema: public
   table_name: ltm_memory
   embedding_dimension: 3072

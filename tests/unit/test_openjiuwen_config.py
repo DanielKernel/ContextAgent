@@ -295,7 +295,15 @@ def test_normalize_async_dsn_for_postgres():
 
     normalized = _normalize_async_dsn(dsn)
 
-    assert normalized == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
+    assert normalized == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?ssl=false"
+
+
+def test_normalize_async_dsn_maps_required_ssl_modes():
+    dsn = "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=require"
+
+    normalized = _normalize_async_dsn(dsn)
+
+    assert normalized == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?ssl=true"
 
 
 def test_build_db_store_reports_missing_asyncpg(monkeypatch):
@@ -388,4 +396,4 @@ def test_instantiate_vector_store_uses_pgvector_bridge(monkeypatch):
     )
 
     assert isinstance(store, FakeBridge)
-    assert store.config["dsn"] == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
+    assert store.config["dsn"] == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?ssl=false"
