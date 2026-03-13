@@ -37,6 +37,17 @@ bash scripts/setup-openclaw.sh
 > bash scripts/setup-openclaw.sh --help
 > ```
 
+> **服务管理脚本：**
+> ```bash
+> bash scripts/restart-contextagent.sh   # 仅重启 ContextAgent
+> bash scripts/restart-pgvector.sh       # 仅重启本地 pgvector/PostgreSQL
+> bash scripts/start-all.sh              # 启动 pgvector（如适用）+ ContextAgent
+> bash scripts/stop-all.sh               # 停止 ContextAgent + pgvector（如适用）
+> bash scripts/restart-all.sh            # 重启全部本地服务
+> ```
+>
+> 若当前 `openJiuwen` 后端不是 `pgvector`，`start-all.sh` / `stop-all.sh` / `restart-all.sh` 会自动跳过本地 pgvector 管理；`restart-pgvector.sh` 会直接提示当前后端不适用。
+
 ---
 
 ### 安装
