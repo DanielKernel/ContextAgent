@@ -330,33 +330,13 @@ def test_build_db_store_reports_missing_asyncpg(monkeypatch):
 
 def test_build_kv_store_patches_openjiuwen_sqlite_insert_for_postgres(monkeypatch):
     from context_agent.config.openjiuwen import _build_kv_store
+    from context_agent.adapters.openjiuwen_db_kv_store import OpenJiuwenDbBasedKVStoreCompat
 
-    class FakeDbBasedKVStore:
-        def __init__(self, engine):
-            self.engine = engine
-
-    sqlite_insert = object()
-    fake_module = type(
-        "FakeModule",
-        (),
-        {"insert": sqlite_insert, "DbBasedKVStore": FakeDbBasedKVStore},
-    )()
     fake_engine = type("Engine", (), {"dialect": type("Dialect", (), {"name": "postgresql"})()})()
-    sentinel_pg_insert = object()
-
-    monkeypatch.setattr(
-        "context_agent.config.openjiuwen.importlib.import_module",
-        lambda module_name: fake_module if module_name == "openjiuwen.core.foundation.store.kv.db_based_kv_store" else __import__(module_name),
-    )
-    monkeypatch.setattr(
-        "sqlalchemy.dialects.postgresql.insert",
-        sentinel_pg_insert,
-    )
 
     store = _build_kv_store(fake_engine)
 
-    assert isinstance(store, FakeDbBasedKVStore)
-    assert fake_module.insert is sentinel_pg_insert
+    assert isinstance(store, OpenJiuwenDbBasedKVStoreCompat)
 
 
 def test_build_model_configs_supplies_default_ssl_cert(monkeypatch, tmp_path):
