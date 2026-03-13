@@ -247,7 +247,7 @@ class RuntimeDependencyHealthChecker:
             return ComponentHealthReport(
                 name="llm",
                 status="skipped",
-                detail="default LLM config still contains unresolved environment placeholders",
+                detail="default LLM config still contains unresolved environment placeholders in the running service process",
                 configured=False,
             )
 
@@ -308,7 +308,7 @@ class RuntimeDependencyHealthChecker:
             return ComponentHealthReport(
                 name="embedding",
                 status="skipped",
-                detail="embedding config still contains unresolved environment placeholders",
+                detail="embedding config still contains unresolved environment placeholders in the running service process",
                 configured=False,
             )
 
@@ -385,15 +385,21 @@ class RuntimeDependencyHealthChecker:
             return cast(AsyncHealthClient, router_adapter), False
         if self._llm_adapter is not None and hasattr(self._llm_adapter, "health_check"):
             return cast(AsyncHealthClient, self._llm_adapter), False
-        if not self._settings.llm_base_url.strip() or not self._settings.llm_model.strip():
+        from context_agent.config.openjiuwen import _resolve_effective_llm_config
+
+        effective_llm_config = _resolve_effective_llm_config(
+            self._settings,
+            self._get_openjiuwen_config(),
+        )
+        if effective_llm_config is None:
             return None, False
         return (
             HttpLLMAdapter(
-                base_url=self._settings.llm_base_url,
-                model=self._settings.llm_model,
-                timeout_s=min(self._settings.llm_timeout_s, self._component_timeout_s),
-                max_retries=self._settings.llm_max_retries,
-                api_key=self._settings.llm_api_key,
+                base_url=effective_llm_config["base_url"],
+                model=effective_llm_config["model"],
+                timeout_s=min(float(effective_llm_config["timeout"]), self._component_timeout_s),
+                max_retries=int(effective_llm_config["max_retries"]),
+                api_key=str(effective_llm_config["api_key"]),
             ),
             True,
         )

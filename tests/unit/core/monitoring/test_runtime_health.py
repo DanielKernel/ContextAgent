@@ -26,6 +26,13 @@ class _HealthyEmbedding:
         return [0.1, 0.2, 0.3]
 
 
+class _FailingLLM:
+    _model = "actual-model"
+
+    async def health_check(self) -> bool:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_runtime_health_checker_reports_all_components_healthy(
     monkeypatch: MonkeyPatch,
@@ -133,3 +140,31 @@ async def test_runtime_health_checker_skips_unresolved_embedding_placeholders() 
 
     assert report.components["embedding"].status == "skipped"
     assert "unresolved environment placeholders" in report.components["embedding"].detail
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_checker_uses_openjiuwen_llm_config_when_settings_are_defaults() -> None:
+    checker = RuntimeDependencyHealthChecker(
+        settings=Settings(),
+        openjiuwen_config={
+            "vector_store": {"backend": "pgvector"},
+            "llm_config": {
+                "provider": "openai",
+                "model": "actual-model",
+                "base_url": "https://actual-llm.example.com",
+                "api_key": "secret",
+            },
+        },
+        llm_adapter=_FailingLLM(),
+    )
+
+    report = await checker.check(
+        SimpleNamespace(
+            _aggregator=SimpleNamespace(_ltm=_HealthyLTM()),
+            _working_memory=object(),
+            _memory_processor=None,
+            _llm_adapter=_FailingLLM(),
+        )
+    )
+
+    assert report.components["llm"].metadata["model"] == "actual-model"

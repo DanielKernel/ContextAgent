@@ -117,6 +117,50 @@ def test_build_default_api_router_wires_llm_adapter(monkeypatch):
     StrategyRegistry.reset()
 
 
+def test_build_default_api_router_prefers_openjiuwen_llm_when_settings_are_defaults(monkeypatch, tmp_path):
+    from context_agent.strategies.registry import StrategyRegistry
+
+    StrategyRegistry.reset()
+
+    config_path = tmp_path / "openjiuwen.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "user_id: context-agent",
+                "llm_config:",
+                "  provider: openai",
+                "  model: actual-model",
+                "  api_key: actual-key",
+                "  base_url: https://actual-llm.example.com",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeLLMAdapter:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.HttpLLMAdapter",
+        FakeLLMAdapter,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
+        lambda _path: object(),
+    )
+
+    router = build_default_api_router(settings=Settings(openjiuwen_config_path=str(config_path)))
+    qa_strategy = router._compression._registry.get("qa")
+
+    assert isinstance(qa_strategy._llm, FakeLLMAdapter)
+    assert qa_strategy._llm.kwargs["base_url"] == "https://actual-llm.example.com"
+    assert qa_strategy._llm.kwargs["model"] == "actual-model"
+    assert qa_strategy._llm.kwargs["api_key"] == "actual-key"
+
+    StrategyRegistry.reset()
+
+
 def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeypatch, tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
     config_path.write_text("user_id: context-agent\n", encoding="utf-8")
@@ -165,6 +209,20 @@ def test_build_default_api_router_uses_default_openjiuwen_path(monkeypatch, tmp_
 def test_build_default_llm_adapter_returns_none_for_blank_endpoint():
     adapter = build_default_llm_adapter(
         Settings(llm_base_url="", llm_model="demo-model")
+    )
+
+    assert adapter is None
+
+
+def test_build_default_llm_adapter_returns_none_when_defaults_should_defer_to_openjiuwen():
+    adapter = build_default_llm_adapter(
+        Settings(),
+        {
+            "llm_config": {
+                "model": "${CTXLLM_MODEL}",
+                "base_url": "${CTXLLM_BASE_URL}",
+            }
+        },
     )
 
     assert adapter is None

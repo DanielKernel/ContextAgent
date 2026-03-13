@@ -191,6 +191,50 @@ def _normalize_provider_name(provider: str) -> str:
     return provider_map.get(normalized.lower(), normalized)
 
 
+def _is_unresolved_placeholder(value: object) -> bool:
+    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
+
+
+def _settings_llm_uses_builtin_defaults(settings: Settings) -> bool:
+    return (
+        settings.llm_base_url == Settings.model_fields["llm_base_url"].default
+        and settings.llm_model == Settings.model_fields["llm_model"].default
+        and settings.llm_api_key == Settings.model_fields["llm_api_key"].default
+    )
+
+
+def _resolve_effective_llm_config(
+    settings: Settings,
+    openjiuwen_config: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if openjiuwen_config is not None and _settings_llm_uses_builtin_defaults(settings):
+        llm_config = openjiuwen_config.get("llm_config", {})
+        if isinstance(llm_config, dict) and llm_config:
+            base_url = str(llm_config.get("base_url", "")).strip()
+            model = str(llm_config.get("model", "")).strip()
+            if base_url and model and not _is_unresolved_placeholder(base_url) and not _is_unresolved_placeholder(model):
+                return {
+                    "base_url": base_url,
+                    "model": model,
+                    "api_key": llm_config.get("api_key", ""),
+                    "timeout": llm_config.get("timeout", settings.llm_timeout_s),
+                    "max_retries": llm_config.get("max_retries", settings.llm_max_retries),
+                }
+        return None
+
+    if not settings.llm_base_url.strip() or not settings.llm_model.strip():
+        return None
+    if _is_unresolved_placeholder(settings.llm_base_url) or _is_unresolved_placeholder(settings.llm_model):
+        return None
+    return {
+        "base_url": settings.llm_base_url,
+        "model": settings.llm_model,
+        "api_key": settings.llm_api_key,
+        "timeout": settings.llm_timeout_s,
+        "max_retries": settings.llm_max_retries,
+    }
+
+
 def _resolve_ssl_cert_path(config: dict[str, Any]) -> tuple[bool, str | None]:
     verify_ssl = bool(config.get("verify_ssl", True))
     ssl_cert = config.get("ssl_cert")
@@ -638,7 +682,7 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
             reason="No openJiuwen config file was found",
         )
 
-    llm_adapter = build_default_llm_adapter(runtime_settings)
+    llm_adapter = build_default_llm_adapter(runtime_settings, openjiuwen_config)
     if llm_adapter is not None:
         router_kwargs["llm_adapter"] = llm_adapter
     router_kwargs["runtime_health_checker"] = RuntimeDependencyHealthChecker(
@@ -654,20 +698,24 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
     )
 
 
-def build_default_llm_adapter(settings: Settings | None = None) -> HttpLLMAdapter | None:
+def build_default_llm_adapter(
+    settings: Settings | None = None,
+    openjiuwen_config: dict[str, Any] | None = None,
+) -> HttpLLMAdapter | None:
     """Build the default HTTP LLM adapter for compression/summarization."""
     runtime_settings = settings or get_settings()
-    if not runtime_settings.llm_base_url.strip() or not runtime_settings.llm_model.strip():
+    effective_llm_config = _resolve_effective_llm_config(runtime_settings, openjiuwen_config)
+    if effective_llm_config is None:
         logger.info(
             "starting without default llm adapter",
-            reason="LLM base_url or model is empty",
+            reason="LLM config is empty, unresolved, or intentionally deferred to openJiuwen",
         )
         return None
 
     return HttpLLMAdapter(
-        base_url=runtime_settings.llm_base_url,
-        model=runtime_settings.llm_model,
-        timeout_s=runtime_settings.llm_timeout_s,
-        max_retries=runtime_settings.llm_max_retries,
-        api_key=runtime_settings.llm_api_key,
+        base_url=effective_llm_config["base_url"],
+        model=effective_llm_config["model"],
+        timeout_s=effective_llm_config["timeout"],
+        max_retries=effective_llm_config["max_retries"],
+        api_key=effective_llm_config["api_key"],
     )

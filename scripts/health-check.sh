@@ -74,6 +74,12 @@ if [[ -z "$HEALTH_URL" ]]; then
   else
     HEALTH_HOST="$HTTP_HOST"
   fi
+  CONFIGURED_PORT="$HTTP_PORT"
+  ACTIVE_PORT="$(find_any_contextagent_listener_port || true)"
+  if [[ -n "$ACTIVE_PORT" ]] && [[ "$ACTIVE_PORT" != "$CONFIGURED_PORT" ]]; then
+    warn "检测到 ContextAgent 实际监听端口为 ${ACTIVE_PORT}（当前配置端口 ${CONFIGURED_PORT}），优先使用实际监听端口"
+    HTTP_PORT="$ACTIVE_PORT"
+  fi
   HEALTH_URL="http://${HEALTH_HOST}:${HTTP_PORT}/health"
 fi
 
@@ -190,6 +196,9 @@ while IFS=$'\t' read -r record_type col1 col2 col3 col4; do
           warn "$message"
         else
           info "$message"
+          if [[ "$detail" == *"unresolved in the running service process"* ]]; then
+            warn "${component_name}: 当前 shell 中若已更新相关环境变量，请重启 ContextAgent 以重新加载配置"
+          fi
         fi
         ;;
       degraded)
