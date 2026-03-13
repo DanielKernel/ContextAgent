@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -146,7 +144,7 @@ class TestJITResolver:
     async def test_local_cache_prunes_to_max_entries(self, monkeypatch):
         retriever = _mock_retriever(items=[])
         resolver = JITResolver(retriever=retriever)
-        monkeypatch.setattr(jit_resolver_module, "JIT_LOCAL_CACHE_MAX_ENTRIES", 2)
+        resolver._settings.jit_cache_local_max_entries = 2
         clock = {"now": 2000.0}
         monkeypatch.setattr(jit_resolver_module.time, "monotonic", lambda: clock["now"])
 
@@ -161,3 +159,18 @@ class TestJITResolver:
 
         assert len(resolver._local_cache) == 2
         assert "ca:tool:scope1:calc:0" not in resolver._local_cache
+
+    async def test_store_tool_result_uses_configured_default_ttl(self):
+        retriever = _mock_retriever(items=[])
+        resolver = JITResolver(retriever=retriever)
+        resolver._settings.jit_cache_ttl_s = 123
+        resolver._set_local_cache = MagicMock()
+
+        await resolver.store_tool_result(
+            "scope1",
+            "calc:cfg-ttl",
+            ContextItem(source_type="tool_result", content="configured ttl"),
+        )
+
+        resolver._set_local_cache.assert_called_once()
+        assert resolver._set_local_cache.call_args.args[2] == 123

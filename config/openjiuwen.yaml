@@ -37,6 +37,7 @@ vector_store:
 memory_config:
   top_k: 10
   score_threshold: 0.3
+  enable_long_term_mem: true
   enable_user_profile: true
   enable_semantic_memory: true
   enable_episodic_memory: true

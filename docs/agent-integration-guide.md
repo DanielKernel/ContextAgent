@@ -63,11 +63,14 @@ storage:
     access_key: ""
     secret_key: ""
 
-llm:
-  base_url: http://localhost:11434
-  model: qwen2.5:7b
-  timeout_s: 30.0
-  max_retries: 2
+compression:
+  llm:
+    base_url: ""
+    model: ""
+    api_key: ""
+    timeout_s: 30.0
+    max_retries: 2
+  compaction_trigger_ratio: 0.85
 
 integrations:
   openjiuwen:
@@ -86,6 +89,33 @@ budgets:
 memory:
   queue_maxsize: 1000
   worker_count: 2
+  hot_tier_ttl_s: 300
+  max_notes_per_session: 100
+
+retrieval:
+  default_top_k: 10
+  timeout_ms: 250.0
+  rerank_top_k: 5
+  hybrid:
+    vector_weight: 0.6
+    sparse_weight: 0.4
+    rrf_k: 60
+  jit_cache:
+    ttl_s: 60
+    local_max_entries: 512
+  hotness:
+    alpha: 0.2
+    half_life_days: 7.0
+  tool_selection:
+    rag_threshold: 20
+    top_k: 10
+
+context_health:
+  thresholds:
+    poisoning: 0.7
+    distraction: 0.5
+    confusion: 0.4
+    clash: 0.6
 
 observability:
   otlp_endpoint: ""
@@ -132,14 +162,16 @@ auth:
 | `access_key` | `str` | `""` | 对象存储访问密钥 |
 | `secret_key` | `str` | `""` | 对象存储访问密钥 |
 
-#### `llm`
+#### `compression`
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `base_url` | `str` | `http://localhost:11434` | ContextAgent 内部压缩/摘要用 LLM 地址 |
-| `model` | `str` | `qwen2.5:7b` | ContextAgent 内部压缩/摘要模型 |
-| `timeout_s` | `float` | `30.0` | LLM 请求超时 |
-| `max_retries` | `int` | `2` | LLM 最大重试次数 |
+| `llm.base_url` | `str` | `""` | ContextAgent 自身压缩/摘要模型地址；留空时优先复用 `openjiuwen.yaml -> llm_config` |
+| `llm.model` | `str` | `""` | ContextAgent 自身压缩/摘要模型名；留空时优先复用 `openjiuwen.yaml -> llm_config` |
+| `llm.api_key` | `str` | `""` | ContextAgent 自身压缩/摘要 API Key |
+| `llm.timeout_s` | `float` | `30.0` | 压缩/摘要 LLM 请求超时 |
+| `llm.max_retries` | `int` | `2` | 压缩/摘要 LLM 最大重试次数 |
+| `compaction_trigger_ratio` | `float` | `0.85` | 上下文压缩触发阈值 |
 
 #### `integrations.openjiuwen`
 
@@ -169,6 +201,34 @@ auth:
 | --- | --- | --- | --- |
 | `queue_maxsize` | `int` | `1000` | 异步记忆写入队列上限 |
 | `worker_count` | `int` | `2` | 异步记忆 worker 数量 |
+| `hot_tier_ttl_s` | `int` | `300` | hot tier 缓存 TTL |
+| `max_notes_per_session` | `int` | `100` | 单会话 working memory note 上限 |
+
+#### `retrieval`
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `default_top_k` | `int` | `10` | ContextAgent 内部默认召回条数 |
+| `timeout_ms` | `float` | `250.0` | UnifiedSearchCoordinator 总召回超时 |
+| `rerank_top_k` | `int` | `5` | rerank 阶段保留的候选数 |
+| `hybrid.vector_weight` | `float` | `0.6` | hybrid 检索中向量召回权重 |
+| `hybrid.sparse_weight` | `float` | `0.4` | hybrid 检索中 sparse/BM25 权重 |
+| `hybrid.rrf_k` | `int` | `60` | RRF 融合平滑系数 |
+| `jit_cache.ttl_s` | `int` | `60` | JIT ref/tool result 缓存 TTL |
+| `jit_cache.local_max_entries` | `int` | `512` | 无 Redis 时本地 JIT 缓存最大条数 |
+| `hotness.alpha` | `float` | `0.2` | hotness 与语义分数的融合权重 |
+| `hotness.half_life_days` | `float` | `7.0` | hotness 时效衰减半衰期 |
+| `tool_selection.rag_threshold` | `int` | `20` | 工具数量超过该值时启用 RAG 选工具 |
+| `tool_selection.top_k` | `int` | `10` | 工具选择默认返回条数 |
+
+#### `context_health`
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `thresholds.poisoning` | `float` | `0.7` | context poisoning 风险告警阈值 |
+| `thresholds.distraction` | `float` | `0.5` | context distraction 风险告警阈值 |
+| `thresholds.confusion` | `float` | `0.4` | context confusion 风险告警阈值 |
+| `thresholds.clash` | `float` | `0.6` | context clash 风险告警阈值 |
 
 #### `observability`
 
@@ -177,6 +237,16 @@ auth:
 | `otlp_endpoint` | `str` | `""` | OTLP 导出地址 |
 | `prometheus_enabled` | `bool` | `true` | 是否暴露 Prometheus 指标 |
 | `metrics_prefix` | `str` | `context_agent` | 指标名前缀 |
+
+### 3.2 当前刻意保留为内部常量的项
+
+以下常量目前没有统一运行态 wiring，或尚未形成稳定的跨场景调优需求，因此仍保留在代码内部，不建议先写进配置模板：
+
+- `WARM_TIER_TTL_S`、`COLD_TIER_TTL_S`：当前未作为活跃执行路径中的核心配置消费点
+- `SYSTEM_PROMPT_TOKEN_RESERVE`、`MAX_HANDOFF_SUMMARY_TOKENS`：尚未接入统一 Settings 消费链路
+- `METRIC_FLUSH_INTERVAL_S`、`ALERT_COOLDOWN_S`：监控组件默认值虽存在，但当前没有统一的默认构造 wiring 从 `context_agent.yaml` 注入
+
+后续如果这些参数进入稳定运行链路，再配置化会更安全，避免出现“模板里有字段、运行时却不生效”的假配置。
 
 #### `auth`
 
@@ -238,6 +308,7 @@ vector_store:
 memory_config:
   top_k: 10
   score_threshold: 0.3
+  enable_long_term_mem: true
   enable_user_profile: true
   enable_semantic_memory: true
   enable_episodic_memory: true
@@ -256,7 +327,7 @@ memory_config:
 - 模型提供方、模型名、API Key
 - embedding 配置
 - 向量数据库连接、集合/表名、索引参数
-- 长期记忆召回阈值和启用项
+- 长期记忆召回阈值和记忆类型启用项
 
 这些字段不要回写进 `context_agent.yaml`。
 

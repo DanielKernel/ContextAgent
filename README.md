@@ -101,6 +101,11 @@ bash scripts/install.sh --vector-backend milvus
 - 运行态配置：`.local/config/context_agent.yaml`、`.local/config/openjiuwen.yaml`
 - 仓库静态模板：`config/context_agent.yaml`、`config/openjiuwen.yaml`
 
+职责边界：
+
+- `context_agent.yaml` 只负责 ContextAgent 自身运行参数：HTTP、Redis、预算、压缩策略、working memory 与检索编排调优
+- `openjiuwen.yaml` 只负责 openJiuwen 相关参数：`llm_config`、`embedding_config`、`vector_store`、`memory_config`
+
 标准命名的示例场景见：
 
 - `examples/configs/pgvector/context_agent.yaml`

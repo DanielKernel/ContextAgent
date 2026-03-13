@@ -13,6 +13,20 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from context_agent.config.defaults import (
+    COMPACTION_TRIGGER_RATIO,
+    DEFAULT_TOP_K,
+    HOT_TIER_TTL_S,
+    HYBRID_SPARSE_WEIGHT,
+    HYBRID_VECTOR_WEIGHT,
+    JIT_LOCAL_CACHE_MAX_ENTRIES,
+    JIT_RESULT_CACHE_TTL_S,
+    MAX_NOTES_PER_SESSION,
+    RERANK_TOP_K,
+    TOOL_RAG_THRESHOLD,
+    TOOL_TOP_K,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUNTIME_CONFIG_DIR = PROJECT_ROOT / ".local" / "config"
 DEFAULT_CONTEXT_AGENT_CONFIG_PATH = DEFAULT_RUNTIME_CONFIG_DIR / "context_agent.yaml"
@@ -36,6 +50,12 @@ _SECTION_FIELD_MAP: dict[tuple[str, ...], str] = {
     ("llm", "api_key"): "llm_api_key",
     ("llm", "timeout_s"): "llm_timeout_s",
     ("llm", "max_retries"): "llm_max_retries",
+    ("compression", "llm", "base_url"): "llm_base_url",
+    ("compression", "llm", "model"): "llm_model",
+    ("compression", "llm", "api_key"): "llm_api_key",
+    ("compression", "llm", "timeout_s"): "llm_timeout_s",
+    ("compression", "llm", "max_retries"): "llm_max_retries",
+    ("compression", "compaction_trigger_ratio"): "compaction_trigger_ratio",
     ("integrations", "openjiuwen", "config_path"): "openjiuwen_config_path",
     ("budgets", "latency", "hot_tier_timeout_ms"): "hot_tier_timeout_ms",
     ("budgets", "latency", "warm_tier_timeout_ms"): "warm_tier_timeout_ms",
@@ -45,6 +65,24 @@ _SECTION_FIELD_MAP: dict[tuple[str, ...], str] = {
     ("budgets", "tokens", "tool_result_token_limit"): "tool_result_token_limit",
     ("memory", "queue_maxsize"): "memory_queue_maxsize",
     ("memory", "worker_count"): "memory_worker_count",
+    ("memory", "hot_tier_ttl_s"): "hot_tier_ttl_s",
+    ("memory", "max_notes_per_session"): "max_notes_per_session",
+    ("retrieval", "default_top_k"): "retrieval_default_top_k",
+    ("retrieval", "timeout_ms"): "retrieval_timeout_ms",
+    ("retrieval", "rerank_top_k"): "retrieval_rerank_top_k",
+    ("retrieval", "hybrid", "vector_weight"): "retrieval_vector_weight",
+    ("retrieval", "hybrid", "sparse_weight"): "retrieval_sparse_weight",
+    ("retrieval", "hybrid", "rrf_k"): "retrieval_rrf_k",
+    ("retrieval", "jit_cache", "ttl_s"): "jit_cache_ttl_s",
+    ("retrieval", "jit_cache", "local_max_entries"): "jit_cache_local_max_entries",
+    ("retrieval", "hotness", "alpha"): "retrieval_hotness_alpha",
+    ("retrieval", "hotness", "half_life_days"): "retrieval_hotness_half_life_days",
+    ("retrieval", "tool_selection", "rag_threshold"): "tool_rag_threshold",
+    ("retrieval", "tool_selection", "top_k"): "tool_top_k",
+    ("context_health", "thresholds", "poisoning"): "context_health_poisoning_threshold",
+    ("context_health", "thresholds", "distraction"): "context_health_distraction_threshold",
+    ("context_health", "thresholds", "confusion"): "context_health_confusion_threshold",
+    ("context_health", "thresholds", "clash"): "context_health_clash_threshold",
     ("observability", "otlp_endpoint"): "otlp_endpoint",
     ("observability", "prometheus_enabled"): "prometheus_enabled",
     ("observability", "metrics_prefix"): "metrics_prefix",
@@ -106,7 +144,7 @@ def _flatten_context_agent_mapping(data: dict[str, Any]) -> dict[str, Any]:
 class ContextAgentYamlSettingsSource(PydanticBaseSettingsSource):
     """Load ContextAgent settings from a YAML or JSON file."""
 
-    def __init__(self, settings_cls: type[BaseSettings]):
+    def __init__(self, settings_cls: type[BaseSettings]) -> None:
         super().__init__(settings_cls)
         self._data = self._load_data()
 
@@ -186,6 +224,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_timeout_s: float = 30.0
     llm_max_retries: int = 2
+    compaction_trigger_ratio: float = Field(default=COMPACTION_TRIGGER_RATIO, gt=0.0, lt=1.0)
 
     # ── openJiuwen ────────────────────────────────────────────────────────────
     openjiuwen_config_path: str = ""
@@ -203,6 +242,32 @@ class Settings(BaseSettings):
     # ── Async memory processing ────────────────────────────────────────────────
     memory_queue_maxsize: int = 1000
     memory_worker_count: int = 2
+    hot_tier_ttl_s: int = Field(default=HOT_TIER_TTL_S, ge=1, le=86400)
+    max_notes_per_session: int = Field(default=MAX_NOTES_PER_SESSION, ge=1, le=10000)
+
+    # ── Retrieval tuning ───────────────────────────────────────────────────────
+    retrieval_default_top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=100)
+    retrieval_timeout_ms: float = Field(default=250.0, ge=10.0, le=5000.0)
+    retrieval_rerank_top_k: int = Field(default=RERANK_TOP_K, ge=1, le=200)
+    retrieval_vector_weight: float = Field(default=HYBRID_VECTOR_WEIGHT, ge=0.0, le=1.0)
+    retrieval_sparse_weight: float = Field(default=HYBRID_SPARSE_WEIGHT, ge=0.0, le=1.0)
+    retrieval_rrf_k: int = Field(default=60, ge=1, le=1000)
+    jit_cache_ttl_s: int = Field(default=JIT_RESULT_CACHE_TTL_S, ge=1, le=86400)
+    jit_cache_local_max_entries: int = Field(
+        default=JIT_LOCAL_CACHE_MAX_ENTRIES,
+        ge=1,
+        le=100000,
+    )
+    retrieval_hotness_alpha: float = Field(default=0.2, ge=0.0, le=1.0)
+    retrieval_hotness_half_life_days: float = Field(default=7.0, gt=0.0, le=365.0)
+    tool_rag_threshold: int = Field(default=TOOL_RAG_THRESHOLD, ge=1, le=1000)
+    tool_top_k: int = Field(default=TOOL_TOP_K, ge=1, le=100)
+
+    # ── Context health thresholds ──────────────────────────────────────────────
+    context_health_poisoning_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    context_health_distraction_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    context_health_confusion_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    context_health_clash_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
     # ── Observability ──────────────────────────────────────────────────────────
     otlp_endpoint: str = ""
@@ -232,15 +297,15 @@ class Settings(BaseSettings):
         )
 
     @property
-    def AUTH_ENABLED(self) -> bool:
+    def AUTH_ENABLED(self) -> bool:  # noqa: N802
         return self.auth_enabled
 
     @property
-    def API_KEYS(self) -> list[str]:
+    def API_KEYS(self) -> list[str]:  # noqa: N802
         return self.api_keys
 
     @property
-    def LOG_LEVEL(self) -> str:
+    def LOG_LEVEL(self) -> str:  # noqa: N802
         return self.log_level
 
 

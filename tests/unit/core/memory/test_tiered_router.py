@@ -153,3 +153,36 @@ class TestTieredMemoryRouter:
 
         assert [item.content for item in items] == ["warm variable fallback"]
         ltm.search.assert_awaited_once()
+
+    async def test_record_usage_updates_redis_hot_cache_active_count(self):
+        ltm = AsyncMock()
+        redis_client = AsyncMock()
+        hot_item = _item("redis mutable", MemoryType.VARIABLE)
+        payload = [hot_item.model_dump(mode="json")]
+        redis_client.get = AsyncMock(return_value=json.dumps(payload))
+
+        router = TieredMemoryRouter(ltm=ltm, redis_client=redis_client)
+        await router.record_usage("scope-1", [hot_item.item_id])
+
+        redis_client.setex.assert_awaited_once()
+        saved_payload = json.loads(redis_client.setex.await_args.args[2])
+        assert saved_payload[0]["active_count"] == 1
+
+    async def test_record_usage_drops_invalid_local_hot_cache(self):
+        ltm = AsyncMock()
+        router = TieredMemoryRouter(ltm=ltm)
+        cache_key = "ca:hot:scope-1"
+        router._local_cache[cache_key] = ([_item("bad", MemoryType.SEMANTIC)], 0.0)
+
+        await router.record_usage("scope-1", ["missing"])
+
+        assert cache_key not in router._local_cache
+
+    async def test_record_usage_ignores_empty_item_ids(self):
+        ltm = AsyncMock()
+        redis_client = AsyncMock()
+        router = TieredMemoryRouter(ltm=ltm, redis_client=redis_client)
+
+        await router.record_usage("scope-1", [])
+
+        redis_client.get.assert_not_awaited()

@@ -15,12 +15,7 @@ from enum import Enum
 from typing import Any
 
 from context_agent.adapters.context_engine_adapter import ContextEnginePort
-from context_agent.config.defaults import (
-    HEALTH_CLASH_THRESHOLD,
-    HEALTH_CONFUSION_THRESHOLD,
-    HEALTH_DISTRACTION_THRESHOLD,
-    HEALTH_POISONING_THRESHOLD,
-)
+from context_agent.config.settings import get_settings
 from context_agent.models.context import ContextSnapshot
 from context_agent.utils.logging import get_logger
 
@@ -77,6 +72,7 @@ class ContextHealthChecker:
     ) -> None:
         self._ce = context_engine
         self._checker = mem_update_checker
+        self._settings = get_settings()
 
     async def check(self, snapshot: ContextSnapshot) -> HealthReport:
         """Analyse a snapshot and return a HealthReport."""
@@ -89,15 +85,15 @@ class ContextHealthChecker:
 
         risks.extend([t_dist.result(), t_conf.result(), t_clash.result()])
 
-        is_healthy = all(r.score < _threshold(r.risk_type) for r in risks)
-        recommendations = _build_recommendations(risks, snapshot)
+        is_healthy = all(r.score < self._threshold(r.risk_type) for r in risks)
+        recommendations = self._build_recommendations(risks, snapshot)
         issues = [
             HealthIssue(
                 description=f"{r.risk_type}: score={r.score:.2f}. {r.details}",
                 severity="critical" if r.score >= 0.9 else "warning",
             )
             for r in risks
-            if r.score >= _threshold(r.risk_type)
+            if r.score >= self._threshold(r.risk_type)
         ]
 
         report = HealthReport(
@@ -113,7 +109,7 @@ class ContextHealthChecker:
             logger.warning(
                 "unhealthy context detected",
                 scope_id=snapshot.scope_id,
-                risks=[r.risk_type for r in risks if r.score >= _threshold(r.risk_type)],
+                risks=[r.risk_type for r in risks if r.score >= self._threshold(r.risk_type)],
             )
         return report
 
@@ -123,13 +119,13 @@ class ContextHealthChecker:
             dist = await self._check_distraction(snapshot)
             conf = await self._check_confusion(snapshot)
             risks = [dist, conf]
-            is_healthy = all(r.score < _threshold(r.risk_type) for r in risks)
+            is_healthy = all(r.score < self._threshold(r.risk_type) for r in risks)
             issues = [
                 HealthIssue(
                     description=f"{r.risk_type}: score={r.score:.2f}. {r.details}",
                 )
                 for r in risks
-                if r.score >= _threshold(r.risk_type)
+                if r.score >= self._threshold(r.risk_type)
             ]
             return HealthReport(
                 scope_id=snapshot.scope_id,
@@ -219,27 +215,39 @@ class ContextHealthChecker:
             return RiskIndicator(RiskType.CLASH, score, details="degraded sources detected")
         return RiskIndicator(RiskType.CLASH, 0.0)
 
+    def _threshold(self, risk_type: RiskType) -> float:
+        return {
+            RiskType.POISONING: self._settings.context_health_poisoning_threshold,
+            RiskType.DISTRACTION: self._settings.context_health_distraction_threshold,
+            RiskType.CONFUSION: self._settings.context_health_confusion_threshold,
+            RiskType.CLASH: self._settings.context_health_clash_threshold,
+        }[risk_type]
 
-def _threshold(risk_type: RiskType) -> float:
-    return {
-        RiskType.POISONING: HEALTH_POISONING_THRESHOLD,
-        RiskType.DISTRACTION: HEALTH_DISTRACTION_THRESHOLD,
-        RiskType.CONFUSION: HEALTH_CONFUSION_THRESHOLD,
-        RiskType.CLASH: HEALTH_CLASH_THRESHOLD,
-    }[risk_type]
-
-
-def _build_recommendations(risks: list[RiskIndicator], snapshot: ContextSnapshot) -> list[str]:
-    recs = []
-    for risk in risks:
-        t = _threshold(risk.risk_type)
-        if risk.score >= t:
-            if risk.risk_type == RiskType.DISTRACTION:
-                recs.append("Filter low-relevance items or raise the score threshold in ExposurePolicy")
-            elif risk.risk_type == RiskType.CONFUSION:
-                recs.append("Rerank results or increase diversity in retrieval to reduce ambiguity")
-            elif risk.risk_type == RiskType.CLASH:
-                recs.append("Run AsyncMemoryProcessor to resolve conflicts; consider routing UC003 for cleanup")
-    if snapshot.is_over_budget:
-        recs.append(f"Context exceeds token budget ({snapshot.total_tokens}/{snapshot.token_budget}); trigger UC009 compression")
-    return recs
+    def _build_recommendations(
+        self,
+        risks: list[RiskIndicator],
+        snapshot: ContextSnapshot,
+    ) -> list[str]:
+        recs = []
+        for risk in risks:
+            threshold = self._threshold(risk.risk_type)
+            if risk.score >= threshold:
+                if risk.risk_type == RiskType.DISTRACTION:
+                    recs.append(
+                        "Filter low-relevance items or raise the score threshold in ExposurePolicy"
+                    )
+                elif risk.risk_type == RiskType.CONFUSION:
+                    recs.append(
+                        "Rerank results or increase diversity in retrieval to reduce ambiguity"
+                    )
+                elif risk.risk_type == RiskType.CLASH:
+                    recs.append(
+                        "Run AsyncMemoryProcessor to resolve conflicts; "
+                        "consider routing UC003 for cleanup"
+                    )
+        if snapshot.is_over_budget:
+            recs.append(
+                "Context exceeds token budget "
+                f"({snapshot.total_tokens}/{snapshot.token_budget}); trigger UC009 compression"
+            )
+        return recs

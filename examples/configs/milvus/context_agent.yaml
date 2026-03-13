@@ -19,11 +19,13 @@ storage:
     access_key: ""
     secret_key: ""
 
-llm:
-  base_url: http://localhost:11434
-  model: qwen2.5:7b
-  timeout_s: 30.0
-  max_retries: 2
+compression:
+  llm:
+    base_url: ""
+    model: ""
+    timeout_s: 30.0
+    max_retries: 2
+  compaction_trigger_ratio: 0.85
 
 integrations:
   openjiuwen:
@@ -42,6 +44,33 @@ budgets:
 memory:
   queue_maxsize: 1000
   worker_count: 2
+  hot_tier_ttl_s: 300
+  max_notes_per_session: 100
+
+retrieval:
+  default_top_k: 10
+  timeout_ms: 250.0
+  rerank_top_k: 5
+  hybrid:
+    vector_weight: 0.6
+    sparse_weight: 0.4
+    rrf_k: 60
+  jit_cache:
+    ttl_s: 60
+    local_max_entries: 512
+  hotness:
+    alpha: 0.2
+    half_life_days: 7.0
+  tool_selection:
+    rag_threshold: 20
+    top_k: 10
+
+context_health:
+  thresholds:
+    poisoning: 0.7
+    distraction: 0.5
+    confusion: 0.4
+    clash: 0.6
 
 observability:
   otlp_endpoint: ""

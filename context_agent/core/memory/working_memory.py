@@ -12,7 +12,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
-from context_agent.config.defaults import MAX_NOTES_PER_SESSION
+from context_agent.config.settings import get_settings
 from context_agent.models.context import ContextItem, MemoryType
 from context_agent.models.note import NOTE_CONTENT_SCHEMAS, NoteType, WorkingNote
 from context_agent.utils.errors import ContextAgentError, ErrorCode
@@ -29,6 +29,7 @@ class WorkingMemoryManager:
     """
 
     def __init__(self, redis_client: aioredis.Redis | None = None) -> None:
+        self._settings = get_settings()
         self._redis = redis_client
         self._local: dict[str, dict[str, str]] = {}  # {hash_key: {note_id: json}}
         self._local_items: dict[str, dict[str, str]] = {}  # {items_key: {item_id: json}}
@@ -44,9 +45,9 @@ class WorkingMemoryManager:
         await self._validate_content(note.note_type, note.content)
 
         existing = await self.list_notes(note.scope_id, note.session_id)
-        if len(existing) >= MAX_NOTES_PER_SESSION:
+        if len(existing) >= self._settings.max_notes_per_session:
             raise ContextAgentError(
-                f"Session note limit ({MAX_NOTES_PER_SESSION}) reached",
+                f"Session note limit ({self._settings.max_notes_per_session}) reached",
                 code=ErrorCode.INTERNAL_ERROR,
             )
 

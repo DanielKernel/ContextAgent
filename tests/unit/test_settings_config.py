@@ -40,6 +40,77 @@ auth:
     assert settings.openjiuwen_config_path == str((config_dir / "openjiuwen.yaml").resolve())
 
 
+def test_settings_load_compression_and_retrieval_sections(monkeypatch, tmp_path):
+    config_path = tmp_path / "context_agent.yaml"
+    config_path.write_text(
+        """
+compression:
+  llm:
+    base_url: https://compression.example.com/v1
+    model: minimax-text
+    api_key: compression-key
+    timeout_s: 12.5
+    max_retries: 4
+  compaction_trigger_ratio: 0.9
+memory:
+  hot_tier_ttl_s: 120
+  max_notes_per_session: 25
+retrieval:
+  default_top_k: 7
+  timeout_ms: 480
+  rerank_top_k: 3
+  hybrid:
+    vector_weight: 0.75
+    sparse_weight: 0.25
+    rrf_k: 45
+  jit_cache:
+    ttl_s: 90
+    local_max_entries: 321
+  hotness:
+    alpha: 0.35
+    half_life_days: 21
+  tool_selection:
+    rag_threshold: 15
+    top_k: 6
+context_health:
+  thresholds:
+    poisoning: 0.8
+    distraction: 0.6
+    confusion: 0.45
+    clash: 0.7
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CA_CONTEXT_AGENT_CONFIG_PATH", str(config_path))
+
+    settings = Settings()
+
+    assert settings.llm_base_url == "https://compression.example.com/v1"
+    assert settings.llm_model == "minimax-text"
+    assert settings.llm_api_key == "compression-key"
+    assert settings.llm_timeout_s == 12.5
+    assert settings.llm_max_retries == 4
+    assert settings.compaction_trigger_ratio == 0.9
+    assert settings.hot_tier_ttl_s == 120
+    assert settings.max_notes_per_session == 25
+    assert settings.retrieval_default_top_k == 7
+    assert settings.retrieval_timeout_ms == 480
+    assert settings.retrieval_rerank_top_k == 3
+    assert settings.retrieval_vector_weight == 0.75
+    assert settings.retrieval_sparse_weight == 0.25
+    assert settings.retrieval_rrf_k == 45
+    assert settings.jit_cache_ttl_s == 90
+    assert settings.jit_cache_local_max_entries == 321
+    assert settings.retrieval_hotness_alpha == 0.35
+    assert settings.retrieval_hotness_half_life_days == 21
+    assert settings.tool_rag_threshold == 15
+    assert settings.tool_top_k == 6
+    assert settings.context_health_poisoning_threshold == 0.8
+    assert settings.context_health_distraction_threshold == 0.6
+    assert settings.context_health_confusion_threshold == 0.45
+    assert settings.context_health_clash_threshold == 0.7
+
+
 def test_env_values_override_context_agent_yaml(monkeypatch, tmp_path):
     config_path = tmp_path / "context_agent.yaml"
     config_path.write_text("http:\n  port: 9010\n", encoding="utf-8")
@@ -80,7 +151,9 @@ integrations:
 
     settings = Settings()
 
-    assert settings.openjiuwen_config_path == str((tmp_path / "shared" / "openjiuwen.yaml").resolve())
+    assert settings.openjiuwen_config_path == str(
+        (tmp_path / "shared" / "openjiuwen.yaml").resolve()
+    )
 
 
 def test_resolve_context_agent_config_path_prefers_runtime_default(monkeypatch, tmp_path):

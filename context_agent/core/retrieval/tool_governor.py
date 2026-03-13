@@ -6,12 +6,11 @@ For large toolsets, applies RAG-based selection; for small toolsets, returns all
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
 from context_agent.adapters.retriever_adapter import RetrieverPort
-from context_agent.config.defaults import TOOL_RAG_THRESHOLD, TOOL_TOP_K
+from context_agent.config.settings import get_settings
 from context_agent.models.context import ContextItem
 from context_agent.utils.logging import get_logger
 
@@ -52,6 +51,7 @@ class ToolContextGovernor:
         retriever: RetrieverPort | None = None,
         tools: list[ToolDefinition] | None = None,
     ) -> None:
+        self._settings = get_settings()
         self._retriever = retriever
         self._tools: dict[str, ToolDefinition] = {
             t.tool_id: t for t in (tools or [])
@@ -68,30 +68,31 @@ class ToolContextGovernor:
         scope_id: str,
         task_description: str,
         task_type: str = "",
-        top_k: int = TOOL_TOP_K,
+        top_k: int | None = None,
     ) -> list[ToolDefinition]:
         """Return the most relevant tools for the given task."""
+        effective_top_k = top_k or self._settings.tool_top_k
         candidate_tools = self._filter_by_task_type(task_type)
 
-        if len(candidate_tools) <= TOOL_RAG_THRESHOLD:
-            return self._sort_by_success_rate(candidate_tools)[:top_k]
+        if len(candidate_tools) <= self._settings.tool_rag_threshold:
+            return self._sort_by_success_rate(candidate_tools)[:effective_top_k]
 
         # Use RAG selection for large toolsets
         if self._retriever is not None:
             selected = await self._rag_select(
-                scope_id, task_description, candidate_tools, top_k
+                scope_id, task_description, candidate_tools, effective_top_k
             )
             return selected
 
         # Fallback: return first top_k
-        return candidate_tools[:top_k]
+        return candidate_tools[:effective_top_k]
 
     async def get_tool_context_items(
         self,
         scope_id: str,
         task_description: str,
         task_type: str = "",
-        top_k: int = TOOL_TOP_K,
+        top_k: int | None = None,
     ) -> list[ContextItem]:
         """Return selected tools as ContextItems ready for injection."""
         tools = await self.select_tools(scope_id, task_description, task_type, top_k)
@@ -117,11 +118,15 @@ class ToolContextGovernor:
         top_k: int,
     ) -> list[ToolDefinition]:
         """Use vector search on tool descriptions to select most relevant tools."""
+        retriever = self._retriever
+        if retriever is None:
+            return candidate_tools[:top_k]
+
         # Build a synthetic query combining task description and tool names
         combined_query = task_description + " " + " ".join(
             t.name for t in candidate_tools
         )
-        items = await self._retriever.agentic_search(
+        items = await retriever.agentic_search(
             scope_id, combined_query, task_description, top_k
         )
         selected_ids = {

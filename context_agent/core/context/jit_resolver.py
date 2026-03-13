@@ -17,13 +17,9 @@ from pydantic import ValidationError
 from redis.exceptions import RedisError
 
 from context_agent.adapters.retriever_adapter import RetrieverPort
-from context_agent.config.defaults import (
-    JIT_LOCAL_CACHE_MAX_ENTRIES,
-    JIT_RESULT_CACHE_TTL_S,
-)
+from context_agent.config.settings import get_settings
 from context_agent.models.context import ContextItem
 from context_agent.models.ref import ContextRef, RefType
-from context_agent.utils.errors import ContextAgentError, ErrorCode
 from context_agent.utils.logging import get_logger
 from context_agent.utils.tracing import record_latency, traced_span
 
@@ -63,6 +59,7 @@ class JITResolver:
         self._wm = working_memory
         self._redis = redis_client
         self._local_cache: dict[str, _LocalCacheEntry] = {}
+        self._settings = get_settings()
 
     async def resolve(
         self,
@@ -186,15 +183,20 @@ class JITResolver:
         return []
 
     async def store_tool_result(
-        self, scope_id: str, cache_key: str, item: ContextItem, ttl_s: int = JIT_RESULT_CACHE_TTL_S
+        self,
+        scope_id: str,
+        cache_key: str,
+        item: ContextItem,
+        ttl_s: int | None = None,
     ) -> None:
         """Store a tool result in the JIT cache for later resolution."""
         full_key = f"ca:tool:{scope_id}:{cache_key}"
+        effective_ttl_s = ttl_s or self._settings.jit_cache_ttl_s
         try:
             if self._redis is not None:
-                await self._redis.setex(full_key, ttl_s, item.model_dump_json())
+                await self._redis.setex(full_key, effective_ttl_s, item.model_dump_json())
             else:
-                self._set_local_cache(full_key, [item], ttl_s)
+                self._set_local_cache(full_key, [item], effective_ttl_s)
         except (RedisError, TypeError, ValueError) as exc:
             logger.warning("tool result store failed", error=str(exc))
 
@@ -219,11 +221,11 @@ class JITResolver:
             if self._redis is not None:
                 await self._redis.setex(
                     cache_key,
-                    JIT_RESULT_CACHE_TTL_S,
+                    self._settings.jit_cache_ttl_s,
                     json.dumps([i.model_dump(mode="json") for i in items]),
                 )
             else:
-                self._set_local_cache(cache_key, items, JIT_RESULT_CACHE_TTL_S)
+                self._set_local_cache(cache_key, items, self._settings.jit_cache_ttl_s)
         except (RedisError, TypeError, ValueError) as exc:
             logger.warning("jit cache write failed", ref_id=ref_id, error=str(exc))
 
@@ -256,7 +258,7 @@ class JITResolver:
         for key in expired_keys:
             self._local_cache.pop(key, None)
 
-        overflow = len(self._local_cache) - JIT_LOCAL_CACHE_MAX_ENTRIES
+        overflow = len(self._local_cache) - self._settings.jit_cache_local_max_entries
         if overflow <= 0:
             return
 

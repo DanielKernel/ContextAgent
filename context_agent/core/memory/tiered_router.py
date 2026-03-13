@@ -17,10 +17,6 @@ from redis.exceptions import RedisError
 
 from context_agent.adapters.external_memory_adapter import ExternalMemoryPort
 from context_agent.adapters.ltm_adapter import LongTermMemoryPort
-from context_agent.config.defaults import (
-    DEFAULT_TOP_K,
-    HOT_TIER_TTL_S,
-)
 from context_agent.config.settings import get_settings
 from context_agent.models.context import ContextItem, MemoryType
 from context_agent.utils.errors import AdapterError, RetrievalError
@@ -34,7 +30,7 @@ _HOT_TIER_MEMORY_TYPES = {MemoryType.VARIABLE}
 
 
 def _validate_hot_cache_payload(
-    payload: Any,
+    payload: object,
     *,
     scope_id: str,
     cache_source: str,
@@ -84,7 +80,7 @@ def _validate_hot_cache_payload(
 
 
 def _validate_local_hot_items(
-    items: Any,
+    items: object,
     *,
     scope_id: str,
 ) -> list[ContextItem] | None:
@@ -141,7 +137,7 @@ class TieredMemoryRouter:
         self,
         scope_id: str,
         query: str,
-        top_k: int = DEFAULT_TOP_K,
+        top_k: int | None = None,
         memory_types: list[MemoryType] | None = None,
         filters: dict[str, Any] | None = None,
         latency_budget_ms: float = 300.0,
@@ -151,6 +147,7 @@ class TieredMemoryRouter:
         Returns:
             (items, latency_breakdown) where latency_breakdown keys are 'hot', 'warm', 'cold'.
         """
+        effective_top_k = top_k or self._settings.retrieval_default_top_k
         remaining_budget = latency_budget_ms
         results: list[ContextItem] = []
         latencies: dict[str, float] = {"hot": 0.0, "warm": 0.0, "cold": 0.0}
@@ -160,7 +157,7 @@ class TieredMemoryRouter:
             hot_types = memory_types or list(MemoryType)
             if any(t in _HOT_TIER_MEMORY_TYPES for t in hot_types):
                 t0 = time.monotonic()
-                hot_items = await self._hot_search(scope_id, query, top_k)
+                hot_items = await self._hot_search(scope_id, query, effective_top_k)
                 latencies["hot"] = record_latency(t0)
                 results.extend(hot_items)
                 remaining_budget -= latencies["hot"]
@@ -171,30 +168,39 @@ class TieredMemoryRouter:
                     latency_ms=f"{latencies['hot']:.1f}",
                 )
 
-            if len(results) >= top_k or remaining_budget <= 0:
-                return results[:top_k], latencies
+            if len(results) >= effective_top_k or remaining_budget <= 0:
+                return results[:effective_top_k], latencies
 
             # ── Warm tier ───────────────────────────────────────────────────
             t0 = time.monotonic()
             warm_items = await self._warm_search(
-                scope_id, query, top_k - len(results), memory_types, filters, remaining_budget
+                scope_id,
+                query,
+                effective_top_k - len(results),
+                memory_types,
+                filters,
+                remaining_budget,
             )
             latencies["warm"] = record_latency(t0)
             results.extend(warm_items)
             remaining_budget -= latencies["warm"]
 
-            if len(results) >= top_k or remaining_budget <= 0 or self._external is None:
-                return results[:top_k], latencies
+            if len(results) >= effective_top_k or remaining_budget <= 0 or self._external is None:
+                return results[:effective_top_k], latencies
 
             # ── Cold tier ───────────────────────────────────────────────────
             t0 = time.monotonic()
             cold_items = await self._cold_search(
-                scope_id, query, top_k - len(results), filters, remaining_budget
+                scope_id,
+                query,
+                effective_top_k - len(results),
+                filters,
+                remaining_budget,
             )
             latencies["cold"] = record_latency(t0)
             results.extend(cold_items)
 
-        return results[:top_k], latencies
+        return results[:effective_top_k], latencies
 
     # ── Hot tier ─────────────────────────────────────────────────────────────
 
@@ -217,28 +223,33 @@ class TieredMemoryRouter:
                         return [ContextItem(**entry) for entry in validated[:top_k]]
             else:
                 entry = self._local_cache.get(cache_key)
-                if entry and time.monotonic() - entry[1] < HOT_TIER_TTL_S:
+                if entry and time.monotonic() - entry[1] < self._settings.hot_tier_ttl_s:
                     validated = _validate_local_hot_items(entry[0], scope_id=scope_id)
                     if validated is not None:
                         return validated[:top_k]
                     self._local_cache.pop(cache_key, None)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.debug("hot tier miss/error", scope_id=scope_id, error=str(exc))
         except (RedisError, json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
             logger.warning("hot tier cache read failed", scope_id=scope_id, error=str(exc))
         return []
 
     async def warm_cache(
-        self, scope_id: str, items: list[ContextItem], ttl_s: int = HOT_TIER_TTL_S
+        self, scope_id: str, items: list[ContextItem], ttl_s: int | None = None
     ) -> None:
         """Pre-warm hot tier with items (called by AsyncMemoryProcessor after updates)."""
         cache_key = f"ca:hot:{scope_id}"
-        data = [item.model_dump(mode="json") for item in items if item.memory_type in _HOT_TIER_MEMORY_TYPES]
+        effective_ttl = ttl_s or self._settings.hot_tier_ttl_s
+        data = [
+            item.model_dump(mode="json")
+            for item in items
+            if item.memory_type in _HOT_TIER_MEMORY_TYPES
+        ]
         if not data:
             return
         try:
             if self._redis is not None:
-                await self._redis.setex(cache_key, ttl_s, json.dumps(data))
+                await self._redis.setex(cache_key, effective_ttl, json.dumps(data))
             else:
                 local_items = [item for item in items if item.memory_type in _HOT_TIER_MEMORY_TYPES]
                 self._local_cache[cache_key] = (local_items, time.monotonic())
@@ -265,7 +276,7 @@ class TieredMemoryRouter:
             for item in items:
                 item.tier = "warm"
             return items
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("warm tier timeout", scope_id=scope_id, budget_ms=budget_ms)
             return []
         except AdapterError as exc:
@@ -293,7 +304,7 @@ class TieredMemoryRouter:
             for item in items:
                 item.tier = "cold"
             return items
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("cold tier timeout", scope_id=scope_id, budget_ms=budget_ms)
             return []
         except (AdapterError, RetrievalError) as exc:
@@ -336,7 +347,11 @@ class TieredMemoryRouter:
                             entry["active_count"] = entry.get("active_count", 0) + 1
                             changed = True
                     if changed:
-                        await self._redis.setex(cache_key, HOT_TIER_TTL_S, json.dumps(validated))
+                        await self._redis.setex(
+                            cache_key,
+                            self._settings.hot_tier_ttl_s,
+                            json.dumps(validated),
+                        )
             else:
                 # Update in-process cache
                 entry = self._local_cache.get(cache_key)

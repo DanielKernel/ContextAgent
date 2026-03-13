@@ -18,13 +18,8 @@ from typing import Any
 
 from context_agent.adapters.ltm_adapter import LongTermMemoryPort
 from context_agent.adapters.retriever_adapter import RetrieverPort
-from context_agent.config.defaults import (
-    DEFAULT_TOP_K,
-    HYBRID_SPARSE_WEIGHT,
-    HYBRID_VECTOR_WEIGHT,
-    RERANK_TOP_K,
-)
-from context_agent.core.memory.hotness import HOTNESS_ALPHA, compute_hotness
+from context_agent.config.settings import get_settings
+from context_agent.core.memory.hotness import compute_hotness
 from context_agent.core.retrieval.task_conditioning import apply_task_conditioning
 from context_agent.models.context import ContextItem
 from context_agent.utils.logging import get_logger
@@ -41,17 +36,18 @@ class RetrievalPlan:
     scope_id: str
     task_type: str = ""
     agent_role: str = ""
-    top_k: int = DEFAULT_TOP_K
+    top_k: int = field(default_factory=lambda: get_settings().retrieval_default_top_k)
     enable_hybrid: bool = True
     enable_graph: bool = False
     enable_ltm: bool = True
     enable_hierarchy: bool = False
     hierarchy_prefix: str = ""  # prefix filter for hierarchical search
-    vector_weight: float = HYBRID_VECTOR_WEIGHT
-    sparse_weight: float = HYBRID_SPARSE_WEIGHT
+    vector_weight: float = field(default_factory=lambda: get_settings().retrieval_vector_weight)
+    sparse_weight: float = field(default_factory=lambda: get_settings().retrieval_sparse_weight)
     rerank: bool = True
-    rerank_top_k: int = RERANK_TOP_K
-    timeout_ms: float = 250.0
+    rerank_top_k: int = field(default_factory=lambda: get_settings().retrieval_rerank_top_k)
+    timeout_ms: float = field(default_factory=lambda: get_settings().retrieval_timeout_ms)
+    rrf_k: int = field(default_factory=lambda: get_settings().retrieval_rrf_k)
     filters: dict[str, Any] = field(default_factory=dict)
 
 
@@ -65,6 +61,7 @@ class UnifiedSearchCoordinator:
     ) -> None:
         self._retriever = retriever
         self._ltm = ltm
+        self._settings = get_settings()
 
     async def search(self, plan: RetrievalPlan) -> list[ContextItem]:
         """Execute retrieval plan and return fused, optionally reranked results."""
@@ -122,7 +119,13 @@ class UnifiedSearchCoordinator:
                 hierarchy_items = self._hierarchy_filter(all_items, plan.hierarchy_prefix)
                 all_items.append(hierarchy_items)
 
-            fused = self._rrf_fuse(all_items, top_k=plan.top_k * 2)
+            fused = self._rrf_fuse(
+                all_items,
+                k=plan.rrf_k,
+                top_k=plan.top_k * 2,
+                hotness_alpha=self._settings.retrieval_hotness_alpha,
+                hotness_half_life_days=self._settings.retrieval_hotness_half_life_days,
+            )
 
             if plan.rerank and fused:
                 fused = await self._retriever.rerank(plan.query, fused, plan.rerank_top_k)
@@ -147,11 +150,13 @@ class UnifiedSearchCoordinator:
         result_lists: list[list[ContextItem]],
         k: int = 60,
         top_k: int = 20,
+        hotness_alpha: float = 0.2,
+        hotness_half_life_days: float = 7.0,
     ) -> list[ContextItem]:
         """Reciprocal Rank Fusion across multiple result lists with hotness blending.
 
         RRF score = Σ 1/(k + rank + 1) across all result lists.
-        Final score is blended with hotness at HOTNESS_ALPHA weight so that
+        Final score is blended with hotness at the configured hotness weight so that
         frequently-confirmed context items rank higher over time.
         """
         scores: dict[str, float] = {}
@@ -168,10 +173,14 @@ class UnifiedSearchCoordinator:
         for iid in sorted_ids[:top_k]:
             item = item_map[iid].model_copy()
             rrf = scores[iid]
-            hotness = compute_hotness(item.active_count, item.updated_at)
+            hotness = compute_hotness(
+                item.active_count,
+                item.updated_at,
+                half_life_days=hotness_half_life_days,
+            )
             # Normalise raw RRF score to [0,1] via tanh, then blend with hotness
             normalised_rrf = math.tanh(rrf * k)
-            blended = (1.0 - HOTNESS_ALPHA) * normalised_rrf + HOTNESS_ALPHA * hotness
+            blended = (1.0 - hotness_alpha) * normalised_rrf + hotness_alpha * hotness
             item.score = min(1.0, blended)
             result.append(item)
         return result

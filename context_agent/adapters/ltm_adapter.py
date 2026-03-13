@@ -6,8 +6,8 @@ All core/orchestration code depends only on LongTermMemoryPort.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import inspect
+from abc import ABC, abstractmethod
 from typing import Any
 
 from context_agent.models.context import ContextItem, MemoryType
@@ -17,14 +17,19 @@ from context_agent.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _method_accepts_name(method: Any, name: str) -> bool:
+def _method_accepts_name(method: Any, name: str) -> bool:  # noqa: ANN401
     try:
         return name in inspect.signature(method).parameters
     except (TypeError, ValueError):
         return False
 
 
-async def _call_ltm_method(method: Any, /, *args: Any, **kwargs: Any) -> Any:
+async def _call_ltm_method(  # noqa: ANN401
+    method: Any,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
     filtered_kwargs = kwargs
     try:
         signature = inspect.signature(method)
@@ -98,7 +103,11 @@ class LongTermMemoryPort(ABC):
 class OpenJiuwenLTMAdapter(LongTermMemoryPort):
     """openJiuwen LongTermMemory implementation of LongTermMemoryPort."""
 
-    def __init__(self, ltm: Any, memory_config: dict[str, Any] | None = None) -> None:
+    def __init__(  # noqa: ANN401
+        self,
+        ltm: Any,
+        memory_config: dict[str, Any] | None = None,
+    ) -> None:
         # ltm: openjiuwen LongTermMemory instance (injected at startup)
         self._ltm = ltm
         self._memory_config = memory_config or {}
@@ -112,7 +121,11 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         filters: dict[str, Any] | None = None,
     ) -> list[ContextItem]:
         try:
-            memory_config = getattr(self, "_memory_config", {"top_k": top_k, "score_threshold": 0.3})
+            memory_config = getattr(
+                self,
+                "_memory_config",
+                {"top_k": top_k, "score_threshold": 0.3},
+            )
             results = await _call_ltm_method(
                 self._ltm.search_user_mem,
                 query=query,
@@ -138,7 +151,11 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                         tier="warm",
                         memory_type=memory_type,
                         score=getattr(r, "score", 1.0),
-                        content=getattr(mem_info, "content", getattr(r, "memory", getattr(r, "content", str(r)))),
+                        content=getattr(
+                            mem_info,
+                            "content",
+                            getattr(r, "memory", getattr(r, "content", str(r))),
+                        ),
                         metadata={
                             "memory_id": getattr(mem_info, "mem_id", getattr(r, "id", "")),
                             "scope_id": scope_id,
@@ -168,15 +185,25 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                     "user": UserMessage,
                 }
                 messages_payload = [
-                    role_map.get(message.get("role", "user"), UserMessage)(content=message.get("content", ""))
+                    role_map.get(
+                        message.get("role", "user"),
+                        UserMessage,
+                    )(content=message.get("content", ""))
                     for message in messages
                 ]
+                memory_config = getattr(self, "_memory_config", {}) or {}
                 agent_config = AgentMemoryConfig(
-                    enable_long_term_mem=True,
-                    enable_user_profile=True,
-                    enable_semantic_memory=True,
-                    enable_episodic_memory=True,
-                    enable_summary_memory=True,
+                    enable_long_term_mem=bool(
+                        memory_config.get("enable_long_term_mem", True)
+                    ),
+                    enable_user_profile=bool(memory_config.get("enable_user_profile", True)),
+                    enable_semantic_memory=bool(
+                        memory_config.get("enable_semantic_memory", True)
+                    ),
+                    enable_episodic_memory=bool(
+                        memory_config.get("enable_episodic_memory", True)
+                    ),
+                    enable_summary_memory=bool(memory_config.get("enable_summary_memory", True)),
                 )
             await _call_ltm_method(
                 self._ltm.add_messages,
@@ -200,7 +227,12 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 scope_id=scope_id,
             )
         except Exception as exc:
-            logger.warning("ltm.delete_by_id failed", scope_id=scope_id, memory_id=memory_id, error=str(exc))
+            logger.warning(
+                "ltm.delete_by_id failed",
+                scope_id=scope_id,
+                memory_id=memory_id,
+                error=str(exc),
+            )
             raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def update_by_id(
@@ -221,7 +253,12 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 updates=updates,
             )
         except Exception as exc:
-            logger.warning("ltm.update_by_id failed", scope_id=scope_id, memory_id=memory_id, error=str(exc))
+            logger.warning(
+                "ltm.update_by_id failed",
+                scope_id=scope_id,
+                memory_id=memory_id,
+                error=str(exc),
+            )
             raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def health_check(self) -> bool:

@@ -203,11 +203,23 @@ def _settings_llm_uses_builtin_defaults(settings: Settings) -> bool:
     )
 
 
+def _settings_llm_defers_to_openjiuwen(settings: Settings) -> bool:
+    if _settings_llm_uses_builtin_defaults(settings):
+        return True
+    if not settings.llm_base_url.strip() or not settings.llm_model.strip():
+        return True
+    if _is_unresolved_placeholder(settings.llm_base_url) or _is_unresolved_placeholder(
+        settings.llm_model
+    ):
+        return True
+    return False
+
+
 def _resolve_effective_llm_config(
     settings: Settings,
     openjiuwen_config: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    if openjiuwen_config is not None and _settings_llm_uses_builtin_defaults(settings):
+    if openjiuwen_config is not None and _settings_llm_defers_to_openjiuwen(settings):
         llm_config = openjiuwen_config.get("llm_config", {})
         if isinstance(llm_config, dict) and llm_config:
             base_url = str(llm_config.get("base_url", "")).strip()

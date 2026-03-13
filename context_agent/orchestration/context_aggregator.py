@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from context_agent.adapters.ltm_adapter import LongTermMemoryPort
-from context_agent.config.defaults import AGGREGATION_TIMEOUT_MS, DEFAULT_TOKEN_BUDGET
+from context_agent.config.settings import get_settings
 from context_agent.core.context.jit_resolver import JITResolver
 from context_agent.core.memory.working_memory import WorkingMemoryManager
 from context_agent.core.retrieval.task_conditioning import apply_task_conditioning
@@ -52,11 +52,11 @@ class AggregationRequest:
     session_id: str
     query: str
     refs: list[ContextRef] = field(default_factory=list)
-    token_budget: int = DEFAULT_TOKEN_BUDGET
-    top_k: int = 10
+    token_budget: int = field(default_factory=lambda: get_settings().default_token_budget)
+    top_k: int = field(default_factory=lambda: get_settings().retrieval_default_top_k)
     enable_ltm: bool = True
     enable_working_memory: bool = True
-    timeout_ms: float = AGGREGATION_TIMEOUT_MS
+    timeout_ms: float = field(default_factory=lambda: get_settings().aggregation_timeout_ms)
     extra_metadata: dict = field(default_factory=dict)
     task_type: str = ""
     agent_role: str = ""

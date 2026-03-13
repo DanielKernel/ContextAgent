@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from context_agent.core.retrieval.search_coordinator import RetrievalPlan, UnifiedSearchCoordinator
-from context_agent.core.retrieval.tool_governor import ToolContextGovernor
+from context_agent.config.settings import get_settings
 from context_agent.strategies.registry import (
     StrategyRegistry,
     ensure_default_strategies_registered,
@@ -68,6 +67,7 @@ class HybridStrategyScheduler:
 
     def schedule(self, ctx: StrategySelectionContext) -> StrategySchedule:
         """Return a StrategySchedule for the given context."""
+        settings = get_settings()
         ensure_default_strategies_registered()
         registry = StrategyRegistry.instance()
         available = set(registry.list())
@@ -88,18 +88,20 @@ class HybridStrategyScheduler:
             if ctx.turn_count > 20:
                 strategy_ids = ["long_session"]
                 notes.append("Auto-selected long_session (turn_count>20)")
-            elif ctx.utilisation > 0.8:
+            elif ctx.utilisation > settings.compaction_trigger_ratio:
                 strategy_ids = ["compaction"]
-                notes.append("Auto-selected compaction (utilisation>80%)")
+                notes.append(
+                    "Auto-selected compaction "
+                    f"(utilisation>{settings.compaction_trigger_ratio:.0%})"
+                )
             elif ctx.task_type == "":
                 strategy_ids = ["qa"]
                 notes.append("Auto-selected qa (default fallback)")
 
         # 3. Realtime override for very low budget
-        if ctx.utilisation > 0.95 and "realtime" in available:
-            if "realtime" not in strategy_ids:
-                strategy_ids.insert(0, "realtime")
-                notes.append("Prepended realtime (utilisation>95%)")
+        if ctx.utilisation > 0.95 and "realtime" in available and "realtime" not in strategy_ids:
+            strategy_ids.insert(0, "realtime")
+            notes.append("Prepended realtime (utilisation>95%)")
 
         # 4. Retrieval config
         enable_graph = ctx.task_type in ("task", "compaction") or ctx.turn_count > 10
