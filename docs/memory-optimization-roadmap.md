@@ -1,444 +1,384 @@
-# ContextAgent 记忆与上下文召回优化路线图
+# ContextAgent 记忆能力全景与优化路线图
 
-本文档用于持续记录两类内容：
+本文档用于同时承载三类内容：
 
-1. 基于 `Awesome-Agent-Memory` 论文库得到的结构化分析结论。
-2. 这些结论在 ContextAgent 中的实际落地进展、验证结果与后续待办。
+1. `ContextAgent` 与 `openJiuwen` 当前记忆能力的**全景盘点**。
+2. `Awesome-Agent-Memory` 论文库对这些能力空间的**全量覆盖映射**。
+3. 基于不同优化目标生成的**可切换路线图**；当前第一条路线聚焦“改善多轮对话体验”。
 
 ---
 
 ## 1. 文档目标与使用方式
 
-本路线图不追求一次性覆盖全部论文，而是采用“高相关优先、持续增量更新”的方式推进。
+本文档不再以“逐篇论文长文分析”为主，而改为**能力矩阵驱动**。
 
-每一轮分析都按以下结构追加：
+这样做有三个原因：
 
-- 论文或论文批次
-- 核心机制摘要
-- 对 ContextAgent 当前实现的启发
-- 可落地改造建议
-- 优先级、收益、风险与验证方案
-- 实际完成内容与后续待办
+1. `Awesome-Agent-Memory` 论文库已经很大，当前上游 README 中可解析的论文/资源条目已达到 **221** 条，继续按论文平均展开会迅速失控。
+2. `ContextAgent` 与 `openJiuwen` 的演进需要的是“能力缺口 -> 能力增强/新增 -> 优先级”的映射，而不是只积累论文摘要。
+3. 后续路线图会按不同目标切换优先级，因此需要一张稳定的能力全景表作为底座。
 
-后续新增分析时，优先补充与以下模块直接相关的论文：
+**推荐阅读顺序**：
 
-- `context_agent/orchestration/context_aggregator.py`
-- `context_agent/core/memory/tiered_router.py`
-- `context_agent/core/retrieval/search_coordinator.py`
-- `context_agent/core/memory/orchestrator.py`
-- `context_agent/core/memory/working_memory.py`
-- `context_agent/adapters/ltm_adapter.py`
-- `context_agent/orchestration/sub_agent_manager.py`
+1. 先看“语料全景与覆盖方式”，理解论文库如何被映射进能力空间。
+2. 再看“ContextAgent / openJiuwen 当前能力清单”，了解当前真实基线。
+3. 然后看“能力全景与对比矩阵”，判断哪些属于增强型能力、哪些属于新增型能力。
+4. 最后按当前优化目标查看对应路线；当前第一条路线聚焦“多轮对话体验”。
 
 ---
 
-## 2. ContextAgent 当前实现基线
+## 2. 论文库全景与覆盖方式
 
-### 2.1 已有能力
+### 2.1 语料来源与当前规模
 
-当前代码已经具备一个较完整的“基础版 memory system”骨架：
+分析对象来自：
 
-| 方向 | 当前实现 |
-| --- | --- |
-| 多源聚合 | `ContextAggregator` 并行聚合 LTM、working memory、JIT refs，并支持超时降级 |
-| 分层召回 | `TieredMemoryRouter` 已区分 hot / warm / cold，并按时延预算逐层召回 |
-| 混合检索 | `UnifiedSearchCoordinator` 已支持 hybrid / graph / LTM 并行与 RRF 融合 |
-| 工作记忆 | `WorkingMemoryManager` 支持 session 级 notes 与 items，Redis 不可用时可降级到进程内存 |
-| 异步写入 | `MemoryOrchestrator` + `AsyncMemoryProcessor` 已支持 working memory 立即写入、LTM 异步持久化 |
-| 基础分类 | 当前已区分 `VARIABLE / EPISODIC / SEMANTIC / PROCEDURAL`，并映射到 `PROFILE / PREFERENCES / EVENTS` 等类别 |
-| 质量路径 | `ContextAggregator` 已保留 `mode=quality` 路径，可接入更强的 agentic retrieval |
-| 压缩降级 | `CompressionStrategyRouter` 具备策略路由与失败回退机制 |
+- `https://github.com/AgentMemoryWorld/Awesome-Agent-Memory`
 
-### 2.2 当前明显缺口
+该仓库自述以 taxonomy 方式整理 foundation agent memory 方向论文。当前 README 中可解析出：
 
-结合现有实现，当前主要缺口不是“没有记忆”，而是“记忆组织与召回策略还比较朴素”：
+- **221** 条论文/资源项
+- taxonomy 主维度：
+  - **Memory Substrate**：external / internal
+  - **Memory Cognitive Mechanism**：sensory / working / episodic / semantic / procedural
+  - **Memory Subject**：user-centric / agent-centric
 
-1. `MemoryOrchestrator._classify_message()` 仍以轻量规则为主，缺少 episode 边界识别、记忆 consolidation 和抽象层次建模。
-2. `ContextAggregator` 目前已经接入轻量 `task-conditioned retrieval` 重排序，但整体仍以“并行抓取 + score 排序 + token budget 截断”为主，缺少跨 turn carryover、coverage-aware pruning、信息瓶颈式候选压缩与叙事级重建。
-3. `TieredMemoryRouter` 的 hot tier 只缓存 `VARIABLE`，对 episodic / semantic / profile 的热点管理还不够细，也缺少 turn / episode / topic 维度的 gating。
-4. `UnifiedSearchCoordinator` 已有 RRF、hotness blending 与 task-aware reordering，但还没有真正的“scope-before-routing”“memory shard gating”“cue-anchor expansion”“episode/topic eligibility masking”等更强 routing 策略。
-5. 用户记忆与 agent 经验记忆虽然在概念上已区分，但当前写入、召回、评估策略还没有围绕“偏好演化、长期稳定画像、技能记忆”形成强约束分流。
-6. 多 agent handoff 已有基础能力，但还未形成“episodic reconstruction + compressed handoff + delegated local reasoning + evidence extraction”的完整链路。
+> 注：仓库简介中仍写“218 key articles”，但当前 README 实际条目数已更高，说明论文库仍在持续更新。后续应以最新 README 解析结果为准。
 
-因此，第一阶段的优化重点应放在：**记忆组织、候选筛选、召回策略、叙事重建、分层结构增强**，而不是先去做底层存储替换。
+### 2.2 语料覆盖策略
+
+本路线图采用“**按能力项聚合**”作为主视图。
+
+也就是说：
+
+- **不是**为 221 篇论文逐条写对称篇幅的评述。
+- **而是**先将全部论文吸收到统一的能力空间中，再对每个能力簇判断：
+  - ContextAgent 是否已有基础
+  - openJiuwen 是否已有 substrate / backend / retrieval 支撑
+  - 这是“增强型能力”还是“新增型能力”
+  - 是否与当前优化目标强相关
+
+### 2.3 论文库 taxonomy 覆盖快照
+
+| 维度 | 标签 | 当前可解析条目数 | 对 ContextAgent 的意义 |
+| --- | --- | ---: | --- |
+| Substrate | `external` | 181 | 对应外部长期记忆、向量库、日志、数据库、记忆服务，和 ContextAgent 当前架构最相关 |
+| Substrate | `internal` | 31 | 对应长上下文、KV cache、参数化/internal memory，更偏后续增强方向 |
+| Mechanism | `semantic` | 89 | 抽象知识、用户画像、稳定事实、summary memory |
+| Mechanism | `episodic` | 84 | 对话轨迹、经验回放、episode reconstruction、narrative memory |
+| Mechanism | `working` | 69 | scratchpad、任务状态、短时变量、当前回合上下文 |
+| Mechanism | `procedural` | 37 | 技能库、tool pattern、policy、经验反思、技能演化 |
+| Mechanism | `sensory` | 25 | 多模态/流式/高频输入记忆，目前超出 ContextAgent 主链路但值得预留 |
+| Subject | `agent` | 139 | agent 自身轨迹、策略、技能、反思与自我改进 |
+| Subject | `user` | 64 | 用户事实、偏好、历史与个性化持续性 |
+
+### 2.4 从 taxonomy 到“可落地能力簇”
+
+为了让语料库能服务工程规划，本文把所有论文进一步吸收进下列能力簇：
+
+1. 外部长时记忆 substrate
+2. working memory / scratchpad
+3. episodic consolidation / narrative memory
+4. semantic abstraction / memory card
+5. procedural / skill memory
+6. user-centric personalization
+7. agent-centric experience memory
+8. retrieval routing / gating / rerank
+9. cross-turn carryover / anti-redundancy
+10. compression / compaction / abstraction balancing
+11. multi-agent handoff / delegated evidence extraction
+12. sensory / multimodal memory
+13. utility governance / privacy / contradiction control
+14. evaluation / benchmark / policy learning
+
+这 14 个能力簇共同覆盖了上游语料库的主干能力空间；后续所有论文都应优先映射到这些能力簇之一或若干簇。
 
 ---
 
-## 3. 第一阶段论文筛选原则
+## 3. ContextAgent 与 openJiuwen 当前能力清单
 
-本阶段优先选择与当前代码缺口高度相关的论文，而不是按时间顺序通读。
+### 3.1 ContextAgent 当前已落地能力
 
-筛选标准如下：
+| 能力方向 | 当前状态 | 主要位置 | 说明 |
+| --- | --- | --- | --- |
+| 多源上下文聚合 | 已有 | `ContextAggregator` | 并行聚合 LTM、working memory、JIT refs，并支持 token budget 与降级 |
+| 分层召回 | 已有 | `TieredMemoryRouter` | 区分 hot / warm / cold，并按时延预算逐层召回 |
+| 混合检索与融合 | 已有 | `UnifiedSearchCoordinator` | 支持 hybrid / graph / LTM 并行以及 RRF 融合 |
+| 工作记忆 | 已有 | `WorkingMemoryManager` | session 级 notes / items；Redis 不可用时回退到进程内存 |
+| 异步长期写入 | 已有 | `MemoryOrchestrator` + `AsyncMemoryProcessor` | 当前链路已打通 working memory -> async -> LTM |
+| 基础记忆分类 | 已有但较轻量 | `MemoryOrchestrator._classify_message()` | 已区分 `VARIABLE / EPISODIC / SEMANTIC / PROCEDURAL`，但仍偏规则化 |
+| 压缩路由 | 已有 | `CompressionStrategyRouter` | 已支持策略路由和 fallback，但压缩对象仍偏 flat items |
+| 子代理上下文隔离 | 已有基础 | `SubAgentContextManager` | 已有 child scope / exposure policy / result merge |
+| OpenClaw 生命周期接入 | 已有 | `openclaw_handler.py` | 已接管 bootstrap / ingest / assemble / compact / after-turn |
+| task-conditioned retrieval（轻量版） | 已落地第一阶段 | `task_conditioning.py`、`ContextAggregator`、`UnifiedSearchCoordinator` | 已做 task-aware rerank，但尚未做 pruning / carryover / scope gating |
 
-1. 能直接改善长时程记忆检索质量，而不是仅讨论通用 agent 框架。
-2. 能映射到当前已有模块，而不是必须先重写整套架构。
-3. 机制上可拆分、可分阶段落地，能在单模块内先试点验证。
-4. 能给出明确的离线或回归测试目标。
+### 3.2 openJiuwen 在当前集成中的可用能力
+
+| 能力方向 | 当前状态 | 当前接入方式 | 说明 |
+| --- | --- | --- | --- |
+| LongTermMemory substrate | 已有 | `OpenJiuwenLTMAdapter` | 作为长期记忆唯一正式边界 |
+| 外部向量/检索后端 | 已有 | openJiuwen config + adapter | 已通过配置对接 pgvector / qdrant / milvus 等能力边界 |
+| 长期写入接口 | 已有 | `add_messages()` | 当前已启用 profile / semantic / episodic / summary memory 开关 |
+| 用户记忆搜索 | 已有 | `search_user_mem` | 当前能接受 query 和基础 filters |
+| 作用域配置 | 已有 | `register_store()` / `set_config()` / `set_scope_config()` | 当前启动链路已做 bootstrap |
+| 检索器/agentic search 能力 | 具备潜在能力 | `agentic_search()` fallback 接口 | 当前 ContextAgent 还没有把 turn / episode / topic 等 richer hints 充分透传 |
+| 更强的记忆组织语义 | 潜在可用但未被充分消费 | adapter 边界 | 当前 ContextAgent 仍把 openJiuwen 更多当作 LTM substrate，而非高层 memory semantics provider |
+
+### 3.3 当前最关键的能力缺口
+
+当前主要问题不是“没有 memory system”，而是**多轮连续性、记忆组织和目标感知没有成为一等输入**。
+
+集中体现在：
+
+1. 缺少 episode consolidation 与 narrative thread。
+2. 缺少 cross-turn carryover 与 anti-redundancy selection。
+3. 缺少 scope / episode / topic 级 gating。
+4. 压缩尚未保留 dialogue acts、决议与未决事项。
+5. 个性化记忆仍缺少“演化”层，而不只是静态 profile。
+6. sub-agent handoff 仍偏可见性过滤，而非基于 episode 的证据提炼和连续推理。
 
 ---
 
-## 4. 第一阶段高优先级论文批次
+## 4. 能力全景与对比矩阵
 
-本轮优先分析以下 6 篇：
+下表是本文档的核心：它把 `ContextAgent`、`openJiuwen`、论文语料库和工程落地策略放在同一张表中。
 
-| 论文 | 关注点 | 与 ContextAgent 的关联度 |
-| --- | --- | --- |
-| [TraceMem](https://arxiv.org/abs/2602.09712) | 对话轨迹叙事化、episode 切分、层级 consolidation | 很高 |
-| [STaR](https://arxiv.org/abs/2602.09255) | task-conditioned retrieval、信息瓶颈式候选压缩 | 很高 |
-| [MEMORA](https://arxiv.org/abs/2602.03315) | 抽象与细节平衡、cue anchor、多入口召回 | 很高 |
-| [E-mem](https://arxiv.org/abs/2601.21714) | episodic context reconstruction、多 assistant 局部推理 | 很高 |
-| [Darwinian Memory](https://arxiv.org/abs/2601.22528) | 动态记忆生态、utility-driven pruning | 中高 |
-| [ShardMemo](https://arxiv.org/abs/2601.21545) | 分片路由、scope-before-routing、tiered memory service | 很高 |
+字段说明：
+
+- **当前状态**：是否已有能力基础。
+- **增强 / 新增**：
+  - **增强型**：当前已有结构或相邻能力，可在原链路上升级。
+  - **新增型**：当前基本缺失，需要新数据结构、新链路或新模块。
+- **实现主位**：优先由 `ContextAgent` 编排层、`openJiuwen` 能力边界，还是二者协同完成。
+
+| 能力簇 | ContextAgent 当前状态 | openJiuwen 当前状态 | 论文覆盖与代表论文 | 能力类型 | 实现主位 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 外部长时记忆 substrate | 已有基础 | 已有基础 | 语料主流集中在 `external`（181）；代表：TraceMem、STaR、ShardMemo、Memoria | 增强型 | openJiuwen + adapter | 当前主链路已具备，不应绕过 openJiuwen |
+| Working memory / scratchpad | 已有 | 间接支撑 | `working`（69）；代表：TraceMem、STaR、Mem-T、ShardMemo | 增强型 | ContextAgent | 当前已有 session 级 working memory，但缺 turn / issue / topic 结构 |
+| Episodic consolidation / narrative memory | 仅有轻量基础 | 潜在可承载 | `episodic`（84）；代表：TraceMem、E-mem、MEMORA、MemWeaver | 新增型偏增强 | ContextAgent 主导，openJiuwen 承载 | 需要先在写入前形成 episode / summary / timeline |
+| Semantic abstraction / memory card | 有基础但较弱 | 有基础 | `semantic`（89）；代表：MEMORA、TraceMem、Memoria | 增强型 | ContextAgent + openJiuwen | 当前 semantic 更像标签分类，缺抽象层次与 memory card |
+| Procedural / skill memory | 基础很弱 | 可承载 | `procedural`（37）；代表：Darwinian Memory、ShardMemo、ReMe、SEAL | 新增型偏增强 | 二者协同 | 当前需要把 tool pattern / skill shard 从普通记忆中分离 |
+| User-centric personalization | 有基础但不连续 | 有基础 | `user`（64）；代表：TraceMem、Memoria、Mem-PAL、Me-Agent | 增强型 | ContextAgent 主导 | 关键在“偏好演化”“临时偏好 vs 稳定画像” |
+| Agent-centric experience memory | 基础较弱 | 可承载 | `agent`（139）；代表：Darwinian Memory、ShardMemo、AMA、BMAM | 新增型偏增强 | ContextAgent + openJiuwen | 当前 agent 经验记忆与用户记忆尚未真正分流 |
+| Retrieval routing / gating / shard probing | 有基础 | filters 已可透传 | 代表：STaR、ShardMemo、MEMORA、MemWeaver | 增强型 | ContextAgent 主导 | 当前已有 RRF / task-aware rerank，但未形成真正 scope-before-routing |
+| Cross-turn carryover / anti-redundancy | 基本缺失 | 无直接现成语义 | 代表：STaR、E-mem、TraceMem | 新增型 | ContextAgent | 对多轮体验最直接 |
+| Compression / compaction / abstraction balancing | 有基础但 flat | 无主导能力 | 代表：MEMORA、STaR、TraceMem、QwenLong-L1.5 | 增强型 | ContextAgent | 当前压缩仍以 flat items 为主，未显式保留问答结构 |
+| Multi-agent handoff / delegated evidence extraction | 有基础 | 无直接主导能力 | 代表：E-mem、BMAM、AMA、Topology Matters | 新增型偏增强 | ContextAgent | 当前 child scope 已有，但未进入 evidence extraction 阶段 |
+| Sensory / multimodal memory | 很弱 | 潜在可扩展 | `sensory`（25）；代表：MemOCR、VideoARM、WorldMM、MemVerse | 新增型 | 二者协同 | 目前不是当前主线，但需在 schema 上预留 |
+| Utility governance / privacy / contradiction control | 有零散基础 | 可存储 metadata | 代表：Darwinian Memory、Forgetful but Faithful、Topology Matters | 增强型 | ContextAgent 主导 | 当前有 hotness 和 health check，但缺长期 utility / privacy / contradiction policy |
+| Evaluation / benchmark / policy learning | 基本缺失 | 无直接主导能力 | 代表：survey、Mem-T、benchmark 类论文 | 新增型 | ContextAgent | 后续需要 continuity / redundancy / recovery 等目标导向评测 |
+
+### 4.1 哪些更适合视为“增强型能力”
+
+这些方向当前已经有可落脚的模块边界，因此优先按增强来做：
+
+- working memory 结构化增强
+- semantic abstraction / memory card
+- retrieval routing / task-conditioned pruning / scope gating
+- compression / abstraction balancing
+- user-centric personalization
+- utility governance / contradiction suppression
+
+### 4.2 哪些更适合视为“新增型能力”
+
+这些方向当前在代码中只有非常弱的前置能力，通常需要新增结构或链路：
+
+- episode consolidation / narrative memory
+- cross-turn carryover / anti-redundancy
+- delegated evidence extraction
+- sensory / multimodal memory
+- evaluation / benchmark / policy learning
+
+
+### 4.3 全量论文的主能力簇分布
+
+为保证“所有论文都被纳入本路线图”，本文对当前可解析的 **221** 条论文/资源项都指定了一个**主能力簇**。
+这不意味着论文只属于单一能力；而是为了让全景矩阵可维护、可排序、可统计。
+
+| 主能力簇 | 主映射条目数 | 能力类型 | 说明 |
+| --- | ---: | --- | --- |
+| 外部长时记忆 substrate | 11 | 增强型 | 底层外部记忆 substrate、Memory OS、数据库与通用记忆框架 |
+| Working memory / scratchpad | 14 | 增强型 | 短时任务态、scratchpad、controller |
+| Episodic consolidation / narrative memory | 9 | 新增型偏增强 | episode、history、narrative、reconstruction |
+| Semantic abstraction / memory card | 18 | 增强型 | 抽象知识、summary、memory card、generalization |
+| Procedural / skill memory | 23 | 新增型偏增强 | 技能、policy、tool pattern、experience reuse |
+| User-centric personalization | 45 | 增强型 | 用户画像、偏好、persona、个性化对话 |
+| Agent-centric experience memory | 7 | 新增型偏增强 | agent 经验、长期自我改进、轨迹积累 |
+| Retrieval routing / gating / shard probing | 18 | 增强型 | 检索路由、筛选、召回路径控制 |
+| Cross-turn carryover / anti-redundancy | 7 | 新增型 | 跨 turn 连续性与去重复注入 |
+| Compression / compaction / abstraction balancing | 9 | 增强型 | 抽象压缩、长会话压缩、compaction |
+| Multi-agent handoff / delegated evidence extraction | 22 | 新增型偏增强 | 多 agent 记忆流转、证据回传 |
+| Sensory / multimodal memory | 25 | 新增型 | 视频/视觉/流式/多模态记忆 |
+| Utility governance / privacy / contradiction control | 5 | 增强型 | 遗忘、隐私、冲突、污染与治理 |
+| Evaluation / benchmark / policy learning | 8 | 新增型 | 评测、指标、benchmark、学习式记忆策略 |
 
 ---
 
-## 5. 逐篇分析与可落地建议
+
+## 5. 与当前代码最相关的高价值论文样本
+
+虽然主文档不再按论文逐条展开，但仍保留一组“高价值样本论文”，作为路线图的解释锚点。
 
 ### 5.1 TraceMem
 
-**核心机制**
-
-TraceMem 的关键贡献不只是“存更多对话”，而是把用户长期对话轨迹拆成 episode，再经过多阶段 consolidation，最终形成带主题和时间演化关系的 narrative memory schema。
-
-**对 ContextAgent 的启发**
-
-ContextAgent 现在已有 working / episodic / semantic / procedural 的基础类型，但从 `MemoryOrchestrator` 当前实现看，episodic 与 semantic 的形成仍偏“句级分类”，缺少：
-
-- episode 边界识别
-- 对话片段到 episodic summary 的 consolidation
-- 用户长期 narrative thread
-- 用户记忆卡（稳定偏好、阶段性目标、关键事件）的层级组织
-
-**建议落地点**
-
-1. 在 `MemoryOrchestrator` 之上新增“memory consolidation”阶段，而不是直接把原始消息送入 LTM。
-2. 为 `WorkingMemoryManager` 或新增组件引入 `episode_id`、`episode_summary`、`theme`、`timeline_position` 等结构化字段。
-3. 在 `OpenJiuwenLTMAdapter.add_messages()` 之前，先做一次 session 内 episode 聚合：
-   - 短期：基于 turn 数、topic shift、任务状态切换做规则切分
-   - 中期：增加 LLM/embedding 辅助的 episode segmentation
-4. 新增“user memory card”视图，作为 `PROFILE / PREFERENCES / EVENTS` 之上的稳定聚合层，用于 personalization recall。
-
-**优先级**
-
-P0。因为它直接改善用户长期记忆组织方式，而且能在当前代码结构上增量实现。
-
-**建议验证**
-
-- 针对长会话构造多主题测试集，验证跨 topic / 跨时间的 multi-hop recall。
-- 对比“原始消息直写 LTM”和“episode consolidation 后写入”的召回准确率与 token 使用量。
-
----
+- 关键词：episode segmentation、narrative memory、user memory card
+- 对应能力簇：episodic consolidation、semantic abstraction、user-centric personalization
+- 对 ContextAgent 的意义：把“原始消息写入 LTM”升级成“episode / narrative thread 写入 LTM”
 
 ### 5.2 STaR
 
-**核心机制**
-
-STaR 的重点是 task-conditioned retrieval：不是先取“大而全”的候选，再交给下游模型，而是按任务条件压缩成紧凑、非冗余、信息密度高的候选集。
-
-**对 ContextAgent 的启发**
-
-当前 `ContextAggregator` 和 `UnifiedSearchCoordinator` 都有召回，但仍以 query 驱动为主，对 `task_type`、`agent_role`、当前阶段状态的利用还比较浅。
-
-**建议落地点**
-
-1. 扩展 `AggregationRequest` 和 `RetrievalPlan`，让 `task_type`、`agent_role`、阶段标签真正进入召回打分。
-2. 在 `UnifiedSearchCoordinator` 前增加 task-conditioned candidate pruning：
-   - 先召回 2x~4x 候选
-   - 再按 task-conditioned features 做信息瓶颈式压缩
-3. 在 `ContextAggregator.aggregate()` 中将“去重”升级为“去重 + 去冗余 + 信息覆盖最大化”。
-4. 将 `CompressionStrategyRouter` 与 retrieval 串联，支持“先轻量召回压缩，再做最终压缩输出”。
-
-**优先级**
-
-P0。对当前主链路最容易形成直接收益，尤其适合现有 `task_type` 字段已经存在但尚未深用的现状。
-
-**建议验证**
-
-- 按 `task_type` 构造回归集，比较 task-conditioned rerank 前后 Top-K recall 与最终回答质量。
-- 跟踪 token_count、latency、冗余片段占比。
-
----
+- 关键词：task-conditioned retrieval、candidate compression、信息密度最大化
+- 对应能力簇：retrieval routing、cross-turn carryover、anti-redundancy selection
+- 对 ContextAgent 的意义：把已有 task-aware rerank 升级成真正的 pruning + coverage-aware selection
 
 ### 5.3 MEMORA
 
-**核心机制**
-
-MEMORA 试图解决“抽象提升可扩展性，但会损失细节”这个经典矛盾。它通过 primary abstractions + concrete memory values + cue anchors，把抽象层和细节层连接起来，并且让召回不只依赖直接语义相似度。
-
-**对 ContextAgent 的启发**
-
-虽然 `ContextAggregator` 已支持 `ABSTRACT / OVERVIEW / DETAIL` 三层 detail level，但当前实现更像“内容粒度过滤”，还不是“抽象节点驱动细节展开”的结构化记忆图。
-
-**建议落地点**
-
-1. 将现有 `ContextLevel` 从“过滤标签”升级为“层级索引结构”：
-   - L0: abstract memory card / episode headline
-   - L1: overview summary
-   - L2: raw detail
-2. 为 `ContextItem.metadata` 引入 anchor 关系：
-   - `parent_memory_id`
-   - `related_memory_ids`
-   - `cue_terms`
-   - `abstraction_of`
-3. 在 `UnifiedSearchCoordinator` 中加入 cue-anchor expansion：
-   - 命中抽象项后，自动扩展其相关 detail 候选
-4. 为 `TieredMemoryRouter` 增加“先 abstract 后 detail”的预算分配策略。
-
-**优先级**
-
-P0-P1。因为当前代码已经有 `ContextLevel`，具备天然切入点。
-
-**建议验证**
-
-- 长会话下比较“只用 detail 相似度召回”与“abstract + anchor expansion”在 multi-hop / temporal questions 上的表现。
-- 跟踪 token 利用率：相同 token budget 下是否能覆盖更多关键上下文。
-
----
+- 关键词：abstraction vs specificity、cue anchors、multi-entry recall
+- 对应能力簇：semantic abstraction、compression balancing、abstract-first recall
+- 对 ContextAgent 的意义：把现有 `ContextLevel` 从过滤标签升级为层级记忆结构
 
 ### 5.4 E-mem
 
-**核心机制**
-
-E-mem 反对过度预处理记忆，强调 episodic context reconstruction：不是把所有历史压成静态 embedding 或图结构，而是在需要时激活相关 episode，由局部 agent 在原始上下文段内做上下文敏感推理，再把证据汇总给主 agent。
-
-**对 ContextAgent 的启发**
-
-这与 ContextAgent 的 `SubAgentContextManager`、`JITResolver`、`quality mode` 很契合，但当前这些能力还没有被真正编织成“激活 episode → 局部推理 → 汇总 handoff”的检索链路。
-
-**建议落地点**
-
-1. 在 `ContextAggregator` 的 `mode=quality` 路径中引入 episodic reconstruction 分支。
-2. 当 query 命中多个相关 episode 时，不直接拼接所有片段，而是：
-   - 先选 episode
-   - 再让局部 sub-agent / helper 对单个 episode 做证据提炼
-   - 最后聚合成 `ContextSnapshot`
-3. 为 `SubAgentContextManager` 增加“memory evidence extraction”模式，而不仅是普通上下文委托。
-4. 为 `JITResolver` 增加 episode ref 解析能力。
-
-**优先级**
-
-P1。因为这条线收益高，但需要把 retrieval、sub-agent、handoff 三块连起来。
-
-**建议验证**
-
-- 构造跨 episode、多跳推理问题，比较直接召回 vs episodic reconstruction。
-- 关注 token 成本和 latency，验证是否能像论文中那样在降低 token 的同时保持甚至提升效果。
-
----
+- 关键词：episodic reconstruction、multi-agent evidence extraction
+- 对应能力簇：multi-agent handoff、quality path、episode-based local reasoning
+- 对 ContextAgent 的意义：让 `mode=quality` 真正具备 episode 激活和局部证据提炼能力
 
 ### 5.5 Darwinian Memory
 
-**核心机制**
-
-Darwinian Memory 的重点是把记忆当作动态生态系统，按 utility 做自然选择和持续淘汰，避免静态累积带来的 context pollution。
-
-**对 ContextAgent 的启发**
-
-当前系统已有 `hotness`、`mark_used()`、健康检查与压缩，但还缺少“长期 utility 评分 + 风险抑制 + 自动淘汰”的显式机制。
-
-**建议落地点**
-
-1. 在 `ContextItem.metadata` 或独立索引中引入 utility signal：
-   - successful_use_count
-   - contradiction_count
-   - last_successful_task_type
-   - staleness_score
-2. 扩展 `compute_hotness()`，让热度不再等同于“新近 + 被点过”，而是综合 utility / risk / freshness。
-3. 定期执行 memory pruning / archiving：
-   - 高频低收益记忆降权
-   - 高风险冲突记忆隔离
-   - 长期未命中但高价值记忆转冷存档
-4. 将 `ContextHealthChecker` 与 pruning 策略打通。
-
-**优先级**
-
-P1。适合在已有监控与热度机制上迭代增强。
-
-**建议验证**
-
-- 对长期运行数据比较 pruning 前后 hallucination / contradiction / distractor 比例。
-- 监测命中率、成功率、平均候选数与平均 token 开销。
-
----
+- 关键词：utility-driven pruning、自调节记忆生态
+- 对应能力簇：utility governance、procedural evolution、contradiction suppression
+- 对 ContextAgent 的意义：当前 hotness / health check 可以成为长期 utility policy 的前置基础
 
 ### 5.6 ShardMemo
 
-**核心机制**
-
-ShardMemo 强调 tiered memory service + scope-before-routing + shard-level gated probing。核心思想是：先用结构化约束排除不可能相关的 shard，再在剩余 shard 上做预算受控的路由和 ANN 搜索。
-
-**对 ContextAgent 的启发**
-
-这几乎就是 `TieredMemoryRouter` 与 `UnifiedSearchCoordinator` 的下一阶段形态。当前系统已有 tier，但尚未真正做到：
-
-- 结构化 eligibility masking
-- shard family / scope family 路由
-- budgeted probing
-- skill library / procedure-specific retrieval
-
-**建议落地点**
-
-1. 在 `RetrievalPlan.filters` 基础上新增 scope-before-routing：
-   - `scope_id`
-   - `session_id`
-   - `memory_type`
-   - `category`
-   - `task_type`
-   - `agent_role`
-2. 在 `UnifiedSearchCoordinator` 外围加入 shard family 概念：
-   - profile shard
-   - episodic shard
-   - working-state shard
-   - procedure / tool shard
-3. 将 `top_k` 搜索改造成 `probe_budget + per_shard_top_k` 模式。
-4. 将 procedural / tool memory 独立为类似 Tier C 的“skill library”。
-
-**优先级**
-
-P0-P1。因为它与当前现有模块边界高度一致，且可分阶段实现。
-
-**建议验证**
-
-- 比较“全局召回”与“scope-before-routing + shard probing”在 p95 latency、Top-K 精度、无关候选比例上的差异。
-- 对多 agent / 多 session 混合数据验证误召回是否下降。
+- 关键词：scope-before-routing、masked MoE、sharded memory
+- 对应能力簇：retrieval routing、procedure shard、agent-centric experience memory
+- 对 ContextAgent 的意义：与 `TieredMemoryRouter` / `UnifiedSearchCoordinator` 的边界高度贴合
 
 ---
 
+## 6. 目标导向路线图框架
 
-### 5.7 ContextAgent 与 openJiuwen 能力对照（面向多轮交互体验）
+本路线图以后不只维护一条“唯一优先级”，而改成：
 
-**当前能力边界**
+- **能力全景层**：稳定展示能力空间与论文覆盖
+- **目标导向路线层**：按不同目标重排优先级
 
-从当前实现看，`openJiuwen` 已经提供了比较强的长期记忆 substrate：`LongTermMemory` 负责消息写入、用户记忆搜索、向量/混合/图检索后端接入；`ContextAgent` 则主要负责 working memory、召回编排、压缩、上下文装配、暴露治理与 sub-agent handoff。
+### 6.1 后续可支持的目标路线
 
-这条边界本身是合理的，但**多轮对话体验所需的结构化信号还没有被真正透传到 openJiuwen，也没有在 ContextAgent 编排层成为一等输入**。
+当前建议至少维护以下几条路线：
 
-| 方向 | 当前能力 | 现状问题 | 更适合的优化位置 |
-| --- | --- | --- | --- |
-| 长期记忆写入 | `OpenJiuwenLTMAdapter.add_messages()` 已调用 openJiuwen `LongTermMemory.add_messages()`，并启用 profile / semantic / episodic / summary memory 开关 | 当前仍以 flat message list 写入，缺少 `turn_index`、`episode_id`、`topic`、`resolution_state` 等 hint | ContextAgent 先做 episode consolidation，再通过 adapter 传 richer metadata 给 openJiuwen |
-| 长期记忆检索 | `OpenJiuwenLTMAdapter.search()` 已调用 `search_user_mem`，支持基础 `filters` | 目前更多是把 openJiuwen 当作通用搜索引擎，缺少 episode/topic/session/task 维度的显式 gating | ContextAgent 构建 retrieval plan / filters，adapter 负责透传 |
-| 工作记忆 | `WorkingMemoryManager` 已提供 session 级 note/item 存储和 `mark_used()` 反馈 | 只有 session 粒度，没有 turn / episode / unresolved issue / current topic 粒度 | ContextAgent working-memory schema 扩展 |
-| 聚合装配 | `ContextAggregator` 已支持多源并发、detail level、task-aware rerank | 仍偏 stateless query aggregation，对“上一个 turn 用过什么 / 还缺什么”几乎无感知 | ContextAgent aggregation request 与 selection 逻辑扩展 |
-| 压缩输出 | `CompressionStrategyRouter` 已有策略路由与回退 | 当前压缩对象仍是 flat items，不保留问答对、决议、未解决项等 dialogue acts | ContextAgent compression strategy 升级 |
-| 多 agent 隔离 | `SubAgentContextManager` 已能创建 child scope 与 merge result | 还不是对话线程级 handoff，没有局部 episode evidence extraction | ContextAgent orchestration / quality path |
+1. **多轮对话体验**
+   - 关注 continuity、少重复、topic recovery、长会话可继续性、偏好演化
+2. **延迟 / 成本优化**
+   - 关注 routing、shard gating、token efficiency、压缩开销、预算调度
+3. **长期个性化与用户记忆质量**
+   - 关注 profile stability、preference evolution、user memory card、privacy-aware forgetting
+4. **多 agent 协同质量**
+   - 关注 evidence extraction、delegated memory、memory leakage、scope isolation
+5. **可靠性与治理**
+   - 关注 contradiction suppression、memory poisoning、privacy、evaluation harness
 
-**结论**
+### 6.2 为什么当前先做“多轮对话体验”
 
-1. 不应绕过 `openJiuwen` 直接在业务代码里操作向量库或长期记忆后端。
-2. 多轮体验优化的主战场仍然是 `ContextAgent` 的编排层：先把 turn / episode / topic / preference-evolution 这些结构化信号组织起来。
-3. 当这些信号稳定后，再通过 `OpenJiuwenLTMAdapter` 把 metadata、filters、search hints 更充分地透传给 `openJiuwen`，才能真正释放其 LTM 能力。
-4. 因此，roadmap 里优先级应从“更换底层存储”转向“强化编排输入与记忆结构”，然后再做更精细的 routing / retrieval / reconstruction。
+因为当前最直接影响体感的问题都集中在这里：
+
+- 每一轮仍偏 stateless retrieval
+- 长会话仍容易碎片化
+- 压缩仍不能表达对话结构
+- 偏好和阶段目标演化感弱
+- topic 切换时恢复上下文仍不稳定
+
+因此，当前第一条目标导向路线仍然应该聚焦多轮体验，而不是先做底层存储替换。
 
 ---
 
+## 7. 第一条目标路线：改善多轮对话体验
 
-## 6. 面向多轮交互体验的重规划
+### 7.1 目标
 
-### 6.1 本轮重规划的目标
+本路线优先改善以下 6 项体验指标：
 
-这轮不再只问“哪个 memory 机制先进”，而是优先回答：**哪个优化最能直接改善真实多轮对话中的交互体验**。
+1. **连续性**：系统知道“这是同一段对话的延续”
+2. **少重复**：连续 turn 不再重复注入相同上下文
+3. **个性化演化**：用户偏好、阶段目标和风格要求可持续更新
+4. **长会话可读性**：压缩后仍保留问答关系、决议和未决事项
+5. **topic 切换恢复能力**：在多个 subtask / episode 间切换后能快速回到正确上下文
+6. **委托后的连续性**：sub-agent 能延续主线程并回传证据而不是裸结果
 
-重点关注以下 6 类体验指标：
-
-1. **连续性**：系统能否理解“这是同一段对话的延续”，而不是每轮都从零召回。
-2. **少重复**：连续多个 turn 是否反复注入同一批上下文，造成模型输出重复。
-3. **个性化演化**：用户偏好、阶段目标、风格要求是否会随对话更新，而不是静态 profile。
-4. **长会话可读性**：压缩后的上下文是否保留问答关系、决策与未解决事项，而不是碎片拼接。
-5. **topic 切换恢复能力**：在多个 topic / subtask / episode 来回切换时，能否快速回到正确上下文。
-6. **委托后的连续性**：sub-agent 是否能在受控上下文下延续主线程，并回传可复用证据而不是裸结果。
-
-### 6.2 面向交互体验的优先级改造清单
-
-#### P0：对多轮体验最直接的改造
+### 7.2 P0：最直接改善多轮体验的能力
 
 1. **Turn-aware context carryover + anti-redundancy selection**
+   - 能力类型：新增型
+   - 对应能力簇：cross-turn carryover、retrieval routing
+   - 代表论文：STaR、E-mem
    - 目标模块：`OpenClaw assemble`、`ContextAPIRouter`、`ContextAggregator`、`task_conditioning.py`
-   - 对应论文/启发：STaR、E-mem
-   - 目标收益：减少连续 turn 的重复注入，让系统知道“上轮已经给过什么、这轮还缺什么”
-   - 说明：这是当前最缺失、但对体感最直接的能力；应把 `turn_index`、`previous_context_ids`、`dialogue_topic`、`resolution_state` 之类信号纳入请求与排序
 
 2. **Episode consolidation + narrative memory before LTM write**
+   - 能力类型：新增型偏增强
+   - 对应能力簇：episodic consolidation、user-centric personalization
+   - 代表论文：TraceMem、MemWeaver、Memoria
    - 目标模块：`MemoryOrchestrator`、`AsyncMemoryProcessor`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
-   - 对应论文：TraceMem
-   - 目标收益：把多轮对话从“消息碎片堆积”升级为“episode / narrative thread”，显著提升跨 turn continuity 与跨 topic 回忆质量
-   - 说明：这是长会话体验的基础设施，也会为后续 episode gating、episodic reconstruction 提供结构前提
 
 3. **Dialogue-aware compression for long_session / compaction**
+   - 能力类型：增强型
+   - 对应能力簇：compression / abstraction balancing
+   - 代表论文：MEMORA、TraceMem、STaR
    - 目标模块：`CompressionStrategyRouter`、压缩策略注册表、`openclaw_handler.compact`
-   - 对应论文/启发：STaR、TraceMem、E-mem
-   - 目标收益：压缩结果保留问答对、关键决议、未决事项和状态变化，提升长会话下的可读性与可继续性
-   - 说明：当前压缩是 flat-item driven，这对多轮交互体验损伤很大，应尽快补齐
 
 4. **Scope-before-routing + episode/topic gating**
+   - 能力类型：增强型
+   - 对应能力簇：retrieval routing / gating
+   - 代表论文：ShardMemo、STaR
    - 目标模块：`UnifiedSearchCoordinator`、`TieredMemoryRouter`、`OpenJiuwenLTMAdapter`
-   - 对应论文：ShardMemo
-   - 目标收益：用户切 topic、回到旧任务、跨 session 回忆时，更快定位正确记忆范围，减少无关干扰
-   - 说明：需优先支持 `session_id`、`episode_id`、`topic`、`task_type`、`agent_role` 级 filters
 
-5. **Task-conditioned retrieval 从 rerank 升级为 pruning + coverage-aware selection**
-   - 目标模块：`task_conditioning.py`、`ContextAggregator`、`UnifiedSearchCoordinator`
-   - 对应论文：STaR、MEMORA
-   - 目标收益：在固定 token budget 下减少冗余，提高每轮注入的信息密度
-   - 说明：该方向已做轻量重排序，应作为“已部分落地的 P0”继续深化，而不是重起炉灶
-
-6. **User preference evolution / personalized memory card**
+5. **User preference evolution / personalized memory card**
+   - 能力类型：增强型
+   - 对应能力簇：semantic abstraction、user-centric personalization
+   - 代表论文：TraceMem、Memoria、Mem-PAL
    - 目标模块：`MemoryOrchestrator`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
-   - 对应论文：TraceMem、Darwinian Memory
-   - 目标收益：让系统能识别“新偏好覆盖旧偏好”“阶段性目标变化”“长期稳定画像与临时偏好并存”
-   - 说明：这对助手类、多轮协作类场景的主观体验提升非常明显
 
-#### P1：建立在 P0 结构之上的增强能力
+6. **Task-conditioned retrieval 从 rerank 升级为 pruning + coverage-aware selection**
+   - 能力类型：增强型
+   - 对应能力簇：retrieval routing / anti-redundancy
+   - 代表论文：STaR、MEMORA
+   - 目标模块：`task_conditioning.py`、`ContextAggregator`、`UnifiedSearchCoordinator`
+
+### 7.3 P1：建立在 P0 之上的增强能力
 
 1. **Abstract-first recall + cue-anchor expansion**
-   - 目标模块：`ContextItem`、`ContextAggregator`、`UnifiedSearchCoordinator`
-   - 对应论文：MEMORA
-   - 适合在 episode / anchor metadata 到位后推进
-
 2. **Episodic reconstruction in quality mode + delegated evidence extraction**
-   - 目标模块：`ContextAggregator(mode=quality)`、`SubAgentContextManager`、`JITResolver`
-   - 对应论文：E-mem
-   - 适合在 episode consolidation 与 scope gating 初步稳定后推进
-
 3. **Utility-driven pruning + contradiction-aware suppression**
-   - 目标模块：`WorkingMemoryManager`、`ContextHealthChecker`、LTM metadata、hotness 计算
-   - 对应论文：Darwinian Memory
-   - 重点解决长期运行后的 context pollution、冲突记忆与低价值高频记忆问题
-
 4. **Agent skill card / procedure shard**
-   - 目标模块：`OpenJiuwenLTMAdapter`、`UnifiedSearchCoordinator`、`TieredMemoryRouter`
-   - 对应论文：ShardMemo、TraceMem
-   - 适合在用户记忆与 agent 经验记忆分流之后推进
 
-#### P2：中长期演进
+### 7.4 P2：中长期演进
 
 1. 学习式 memory routing / policy optimization
-2. 多轮连续性质量评估器（continuity / redundancy / recovery benchmarks）
-3. 多 agent 共享记忆协议与 delegated memory evidence exchange
-4. 更强的长期个性化稳定性/漂移控制机制
+2. continuity / redundancy / recovery evaluation harness
+3. 多 agent delegated memory exchange
+4. 更强的长期个性化稳定性 / 漂移控制机制
 
----
+### 7.5 建议落地顺序
 
-## 7. 建议的落地顺序（按多轮体验收益排序）
+#### Phase 1：先补足多轮连续性的基础信号
 
-### Phase 1：先补足多轮连续性的基础信号
-
-- 为请求链路补入 `turn_index`、`previous_context_ids`、`dialogue_topic`、`resolution_state`
+- 引入 `turn_index`、`previous_context_ids`、`dialogue_topic`、`resolution_state`
 - 将现有 task-conditioned retrieval 升级为 anti-redundancy + coverage-aware selection
-- 明确用于评估的多轮体验指标：重复率、continuity、topic recovery、压缩可读性
+- 定义多轮体验评测指标：重复率、continuity、topic recovery、压缩可读性
 
-### Phase 2：把消息流改造成 episode / narrative 结构
+#### Phase 2：把消息流改造成 episode / narrative 结构
 
 - 在 LTM 写入前增加 episode consolidation
 - 给 working memory / LTM metadata 补 `episode_id`、`topic`、`timeline_position`、`preference_scope`
-- 建立 user memory card / preference evolution 的基础结构
+- 建立 user memory card / preference evolution 基础结构
 
-### Phase 3：升级召回与压缩体验
+#### Phase 3：升级召回与压缩体验
 
 - 实现 scope-before-routing + episode/topic gating
-- 引入 dialogue-aware compression，优先用于 `long_session` / `compaction`
-- 在固定 token budget 下做到更少重复、更多关键信息保留
+- 引入 dialogue-aware compression
+- 在固定 token budget 下做到更少重复、更多高价值信息
 
-### Phase 4：增强复杂问题与多 agent 场景
+#### Phase 4：增强复杂问题与多 agent 场景
 
 - abstract-first recall + cue-anchor expansion
 - episodic reconstruction + delegated evidence extraction
@@ -446,37 +386,18 @@ P0-P1。因为它与当前现有模块边界高度一致，且可分阶段实现
 
 ---
 
-## 8. 本轮实际完成内容
+## 8. 已落地进展
 
-本轮已完成以下工作：
-
-1. 阅读 `Awesome-Agent-Memory` 仓库的 taxonomy 与论文索引，确认该仓库适合采用“高相关优先”的持续分析策略。
-2. 结合 ContextAgent 当前代码，梳理出第一阶段最相关的优化方向：
-   - task-conditioned retrieval
-   - episode consolidation
-   - abstract-first memory organization
-   - scope-before-routing / shard probing
-   - episodic reconstruction
-   - utility-driven pruning
-3. 选定首批 6 篇高优先级论文，并完成逐篇分析：
-   - TraceMem
-   - STaR
-   - MEMORA
-   - E-mem
-   - Darwinian Memory
-   - ShardMemo
-4. 建立本文档，作为后续持续追加“论文分析 + 实际落地进展”的主文档。
-5. 在已有论文分析基础上，重新以“多轮对话交互体验”为目标审视 `ContextAgent` 与 `openJiuwen` 的真实能力边界，并把 roadmap 从“机制导向”重排为“体验收益导向”。
-
----
-
-## 9. 已落地进展
-
-### 9.1 Task-conditioned retrieval / candidate pruning
+### 8.1 Task-conditioned retrieval / candidate pruning（第一阶段）
 
 **状态**
 
 done
+
+**对应能力簇**
+
+- retrieval routing / gating
+- cross-turn 相关能力的前置基础
 
 **对应论文**
 
@@ -504,28 +425,6 @@ done
   - `RetrievalPlan` 新增 `task_type`、`agent_role`
   - 在 RRF / rerank 之后追加 task-conditioned reordering
 
-**当前效果**
-
-当前实现已经能让系统在不引入额外外部依赖的情况下，按任务类型更偏向：
-
-- `qa`：semantic / profile / preferences
-- `task`：variable / procedural / patterns / hot tier
-- `long_session`：episodic / events / overview
-- `realtime`：hot / variable / abstract
-- `compaction`：abstract / overview
-
-这属于路线图中的 P0 第一阶段：先让已有字段真正参与召回，而不是停留在接口层。
-
-**改动文件**
-
-- `context_agent/core/retrieval/task_conditioning.py`
-- `context_agent/orchestration/context_aggregator.py`
-- `context_agent/core/retrieval/search_coordinator.py`
-- `context_agent/api/router.py`
-- `tests/unit/test_aggregator.py`
-- `tests/unit/core/retrieval/test_search_coordinator.py`
-- `tests/unit/test_api_router_outputs.py`
-
 **验证结果**
 
 已通过：
@@ -534,24 +433,6 @@ done
 - 搜索协调器回归测试
 - API 搜索输出回归测试
 - 变更文件的 focused Ruff 检查
-
-执行命令：
-
-```bash
-.venv/bin/python3 -m ruff check --select F401,I001,E501,UP041,B905 \
-  context_agent/core/retrieval/task_conditioning.py \
-  context_agent/orchestration/context_aggregator.py \
-  context_agent/api/router.py \
-  context_agent/core/retrieval/search_coordinator.py \
-  tests/unit/test_aggregator.py \
-  tests/unit/core/retrieval/test_search_coordinator.py \
-  tests/unit/test_api_router_outputs.py
-
-.venv/bin/python3 -m pytest \
-  tests/unit/test_aggregator.py \
-  tests/unit/core/retrieval/test_search_coordinator.py \
-  tests/unit/test_api_router_outputs.py
-```
 
 结果：
 
@@ -562,25 +443,267 @@ done
 
 当前还是规则型 task conditioning，不是学习式路由，也没有引入信息瓶颈式 candidate selection。
 
-后续建议继续推进：
+**下一步最自然的延伸**
 
-1. 将 `task_type`、`agent_role` 进入 `RetrievalPlan.filters`，形成真正的 scope-before-routing。
-2. 将“去重”升级为“去冗余 + coverage-aware selection”。
-3. 加入 anchor expansion 和 abstract-first retrieval。
+1. 将 `task_type`、`agent_role` 进入 `RetrievalPlan.filters`，形成真正的 scope-before-routing
+2. 将“去重”升级为“去冗余 + coverage-aware selection”
+3. 加入 anchor expansion 和 abstract-first retrieval
 
 ---
 
-## 10. 后续更新约定
+## 9. 后续更新约定
 
-后续每完成一项实际改造，都应在本文档补充：
+后续每轮更新，优先按如下模板增量补充：
 
 | 字段 | 说明 |
 | --- | --- |
-| 改造项 | 例如：task-conditioned retrieval |
-| 对应论文 | 来源论文或组合来源 |
-| 代码路径 | 实际改动文件 |
-| 状态 | planned / in_progress / done |
+| 能力簇 | 例如：episodic consolidation / narrative memory |
+| 目标路线 | 例如：多轮对话体验 / 延迟成本 / 个性化 |
+| 当前状态 | absent / weak / partial / done |
+| 能力类型 | 增强型 / 新增型 |
+| 代码路径 | 实际落点 |
+| 对应论文 | 代表论文 + 相关论文 |
 | 验证 | 单测、集成测试、性能回归、定性案例 |
-| 结果 | 指标提升、风险、是否继续扩展 |
+| 备注 | 风险、前置依赖、是否适合作为下一轮工作 |
 
-建议后续每一轮只新增一个小批次论文，并至少把其中 1 个建议推进到“代码 + 测试 + 文档回写”。
+建议未来的推进节奏是：
+
+1. 先在“能力全景矩阵”里补足覆盖。
+2. 再从某一条“目标导向路线”里选择 1 个能力簇推进到代码落地。
+3. 完成后把状态、验证和结果回写到同一文档，而不是新开平行 roadmap。
+
+---
+
+## 10. 附录：全量论文主能力簇映射索引
+
+本附录用于满足“对 `Awesome-Agent-Memory` 当前全部论文进行能力映射”的要求。
+映射原则如下：
+
+1. 每篇论文至少映射到一个**主能力簇**。
+2. 主能力簇由论文标题语义 + taxonomy 标签（substrate / mechanism / subject）共同决定。
+3. 论文往往同时覆盖多个能力簇；主映射只用于建立全景索引，不替代正文中的多簇关联分析。
+4. `能力类型` 字段沿用正文矩阵的判定：区分“增强型”“新增型”“新增型偏增强”。
+
+| # | 论文 | 年份 | taxonomy 标签 | 主能力簇 | 能力类型 |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | [TraceMem: Weaving Narrative Memory Schemata from User Conversational Traces](https://arxiv.org/abs/2602.09712) | 2026 | `external, user, episodic, working, semantic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 2 | [STaR: Scalable Task-Conditioned Retrieval for Long-Horizon Multimodal Robot Memory](https://arxiv.org/abs/2602.09255) | 2026 | `external, agent, working, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 3 | [MEMORA: A Harmonic Memory Representation Balancing Abstraction and Specificity](https://arxiv.org/abs/2602.03315) | 2026 | `external, agent, episodic, semantic` | Semantic abstraction / memory card | 增强型 |
+| 4 | [Mem-T: Densifying Rewards for Long-Horizon Memory Agents](https://arxiv.org/abs/2601.23014) | 2026 | `internal, agent, working, sensory, semantic, episodic` | Sensory / multimodal memory | 新增型 |
+| 5 | [Darwinian Memory: A Training-Free Self-Regulating Memory System for GUI Agent Evolution](https://arxiv.org/abs/2601.22528) | 2026 | `external, agent, procedural, episodic` | Utility governance / privacy / contradiction control | 增强型 |
+| 6 | [E-mem: Multi-agent based Episodic Context Reconstruction for LLM Agent Memory](https://arxiv.org/abs/2601.21714) | 2026 | `external, agent, episodic, semantic` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 7 | [ShardMemo: Masked MoE Routing for Sharded Agentic LLM Memory](https://arxiv.org/abs/2601.21545) | 2026 | `external, agent, working, semantic, procedural, episodic` | Retrieval routing / gating / shard probing | 增强型 |
+| 8 | [MemOCR: Layout-Aware Visual Memory for Efficient Long-Horizon Reasoning](https://arxiv.org/abs/2601.21468) | 2026 | `internal, agent, working, episodic, semantic` | Sensory / multimodal memory | 新增型 |
+| 9 | [MemCtrl: Using MLLMs as Active Memory Controllers on Embodied Agents](https://arxiv.org/abs/2601.20831) | 2026 | `internal, agent, working, episodic, semantic` | Sensory / multimodal memory | 新增型 |
+| 10 | [BMAM: Brain-inspired Multi-Agent Memory Framework](https://arxiv.org/abs/2601.20465) | 2026 | `external, agent, episodic, semantic, working, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 11 | [AMA: Adaptive Memory via Multi-Agent Collaboration](https://arxiv.org/abs/2601.20352) | 2026 | `external, agent, episodic, semantic` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 12 | [Me-Agent: A Personalized Mobile Agent with Two-Level Use](https://arxiv.org/abs/2601.20162) | 2026 | `external, user, semantic, procedural, episodic, sensory` | User-centric personalization | 增强型 |
+| 13 | [MAGNET: Towards Adaptive GUI Agents with Memory-Driven Knowledge Evolution](https://arxiv.org/abs/2601.19199) | 2026 | `external, agent, procedural, semantic` | Procedural / skill memory | 新增型偏增强 |
+| 14 | [MemWeaver: Weaving Hybrid Memories for Traceable Long-Horizon Agentic Reasoning](https://arxiv.org/abs/2601.18204) | 2026 | `external, agent, semantic, episodic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 15 | [Self-Evolving Distributed Memory Architecture for Scalable AI Systems](https://arxiv.org/abs/2601.05569) | 2026 | `external, agent, episodic, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 16 | [Memoria: A Scalable Agentic Memory Framework for Personalized Conversational AI](https://arxiv.org/abs/2512.12686) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 17 | [Forgetful but Faithful: A Cognitive Memory Architecture and Benchmark for Privacy-Aware Generative Agents](https://arxiv.org/abs/2512.12856) | 2025 | `external, agent, episodic, semantic, working` | Utility governance / privacy / contradiction control | 增强型 |
+| 18 | [QwenLong-L1.5: Post-Training Recipe for Long-Context Reasoning and Memory Management](https://arxiv.org/abs/2512.12967) | 2025 | `internal, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 19 | [V-Rex: Real-Time Streaming Video LLM Acceleration via Dynamic KV Cache Retrieval](https://arxiv.org/abs/2512.12284) | 2025 | `external, agent, sensory, working` | Retrieval routing / gating / shard probing | 增强型 |
+| 20 | [VideoARM: Agentic Reasoning over Hierarchical Memory for Long-Form Video Understanding](https://arxiv.org/abs/2512.12360) | 2025 | `external, agent, sensory, episodic, working` | Sensory / multimodal memory | 新增型 |
+| 21 | [Unifying Dynamic Tool Creation and Cross-Task Experience Sharing through Cognitive Memory Architecture](https://arxiv.org/abs/2512.11303) | 2025 | `external, agent, episodic, semantic, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 22 | [Confucius Code Agent: Scalable Agent Scaffolding for Real-World Codebases](https://arxiv.org/abs/2512.10398) | 2025 | `external, agent, episodic, working` | Working memory / scratchpad | 增强型 |
+| 23 | [Remember Me, Refine Me: A Dynamic Procedural Memory Framework for Experience-Driven Agent Evolution](https://arxiv.org/abs/2512.10696) | 2025 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 24 | [DeepCode: Open Agentic Coding](https://arxiv.org/abs/2512.07921) | 2025 | `external, agent, semantic, working` | Working memory / scratchpad | 增强型 |
+| 25 | [Topology Matters: Measuring Memory Leakage in Multi-Agent LLMs](https://arxiv.org/abs/2512.04668) | 2025 | `external, user, semantic, working` | Utility governance / privacy / contradiction control | 增强型 |
+| 26 | [SEAL: Self-Evolving Agentic Learning for Conversational Question Answering over Knowledge Graphs](https://arxiv.org/abs/2512.04868) | 2025 | `external, agent, working, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 27 | [From Static to Adaptive: Immune Memory-based Jailbreak Detection for Large Language Models](https://arxiv.org/abs/2512.03356) | 2025 | `external, agent, episodic` | Utility governance / privacy / contradiction control | 增强型 |
+| 28 | [MemVerse: Multimodal Memory for Lifelong Learning Agents](https://arxiv.org/abs/2512.03627) | 2025 | `external, internal, user, sensory, episodic, semantic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 29 | [WorldMM: Dynamic Multimodal Memory Agent for Long Video Reasoning](https://arxiv.org/abs/2512.02425) | 2025 | `external, agent, sensory, episodic, semantic` | Sensory / multimodal memory | 新增型 |
+| 30 | [CuES: A Curiosity-driven and Environment-grounded Synthesis Framework for Agentic RL](https://arxiv.org/abs/2512.01311) | 2025 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 31 | [Describe Anything Anywhere At Any Moment](https://arxiv.org/abs/2512.00565) | 2025 | `external, agent, episodic, semantic` | Semantic abstraction / memory card | 增强型 |
+| 32 | [Adapting Like Humans: A Metacognitive Agent with Test-time Reasoning](https://arxiv.org/abs/2511.23262) | 2025 | `external, agent, semantic, working, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 33 | [Solving Context Window Overflow in AI Agents](https://arxiv.org/abs/2511.22729) | 2025 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 34 | [MG-Nav: Dual-Scale Visual Navigation via Sparse Spatial Memory](https://arxiv.org/abs/2511.22609) | 2025 | `external, agent, semantic, working` | Sensory / multimodal memory | 新增型 |
+| 35 | [Agentic Learner with Grow-and-Refine Multimodal Semantic Memory](https://arxiv.org/abs/2511.21678) | 2025 | `external, agent, semantic` | Sensory / multimodal memory | 新增型 |
+| 36 | [MADRA: Multi-Agent Debate for Risk-Aware Embodied Planning](https://arxiv.org/abs/2511.21460) | 2025 | `external, user, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 37 | [Evo-Memory: Benchmarking LLM Agent Test-time Learning with Self-Evolving Memory](https://arxiv.org/abs/2511.20857) | 2025 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 38 | [Improving Language Agents through BREW](https://arxiv.org/abs/2511.20297) | 2025 | `external, agent, semantic, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 39 | [Latent Collaboration in Multi-Agent Systems](https://arxiv.org/abs/2511.20639) | 2025 | `-` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 40 | [General Agentic Memory Via Deep Research](https://arxiv.org/abs/2511.18423) | 2025 | `external, user, semantic, working` | Retrieval routing / gating / shard probing | 增强型 |
+| 41 | [Episodic Memory in Agentic Frameworks: Suggesting Next Tasks](https://arxiv.org/abs/2511.17775) | 2025 | `external, agent, episodic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 42 | [A Simple Yet Strong Baseline for Long-Term Conversational Memory of LLM Agents](https://arxiv.org/abs/2511.17208) | 2025 | `external, user, episodic` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 43 | [Mem-PAL: Towards Memory-based Personalized Dialogue Assistants for Long-term User-Agent Interaction](https://arxiv.org/abs/2511.13410) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 44 | [Multi-agent In-context Coordination via Decentralized Memory Retrieval](https://arxiv.org/abs/2511.10030) | 2025 | `external, agent, episodic, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 45 | [History-Aware Reasoning for GUI Agent](https://arxiv.org/abs/2511.09127) | 2025 | `internal, user, episodic, working` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 46 | [From Experience to Strategy: Empowering LLM Agents with Trainable Graph Memory](https://arxiv.org/abs/2511.07800) | 2025 | `external, agent, episodic, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 47 | [Smarter Together: Creating Agentic Communities of Practice through Shared Experiential Learning](https://arxiv.org/abs/2511.08301) | 2025 | `external, agent, semantic, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 48 | [Beyond Fact Retrieval: Episodic Memory for RAG with Generative Semantic Workspaces](https://arxiv.org/abs/2511.07587) | 2025 | `external, agent, episodic, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 49 | [IterResearch: Rethinking Long-Horizon Agents via Markovian State Reconstruction](https://arxiv.org/abs/2511.07327) | 2025 | `external, agent, working` | Retrieval routing / gating / shard probing | 增强型 |
+| 50 | [MemoriesDB: A Temporal-Semantic-Relational Database for Long-Term Agent Memory](https://arxiv.org/abs/2511.06179) | 2025 | `external, agent` | 外部长时记忆 substrate | 增强型 |
+| 51 | [Nested Learning: The Illusion of Deep Learning Architectures](https://arxiv.org/abs/2512.24695) | 2025 | `internal, agent, semantic, working` | Working memory / scratchpad | 增强型 |
+| 52 | [Towards Realistic Project-Level Code Generation via Multi-Agent Collaboration and Semantic Architecture Modeling](https://arxiv.org/abs/2511.03404) | 2025 | `external, agent, semantic, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 53 | [HaluMem: Evaluating Hallucinations in Memory Systems of Agents](https://arxiv.org/abs/2511.03506) | 2025 | `-` | Utility governance / privacy / contradiction control | 增强型 |
+| 54 | [MemSearcher: Training LLMs to Reason, Search and Manage Memory via End-to-End Reinforcement Learning](https://arxiv.org/abs/2511.02805) | 2025 | `external, agent, working` | Retrieval routing / gating / shard probing | 增强型 |
+| 55 | [EvoMem: Improving Multi-Agent Planning with Dual-Evolving Memory](https://arxiv.org/abs/2511.01912) | 2025 | `external, agent, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 56 | [LiCoMemory: Lightweight and Cognitive Agentic Memory for Efficient Long-Term Reasoning](https://arxiv.org/abs/2511.01448) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 57 | [Dynamic Affective Memory Management for Personalized LLM Agents](https://arxiv.org/abs/2510.27418) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 58 | [TheraMind: A Strategic and Adaptive Agent for Longitudinal Psychological Counseling](https://arxiv.org/abs/2510.25758) | 2025 | `external, user, episodic, working` | User-centric personalization | 增强型 |
+| 59 | [AgentFold: Long-Horizon Web Agents with Proactive Context Management](https://arxiv.org/abs/2510.24699) | 2025 | `external, agent, episodic, working` | Working memory / scratchpad | 增强型 |
+| 60 | [MGA: Memory-Driven GUI Agent for Observation-Centric Interaction](https://arxiv.org/abs/2510.24168) | 2025 | `external, agent, episodic, working` | Sensory / multimodal memory | 新增型 |
+| 61 | [Evaluating Long-Term Memory for Long-Context Question Answering](https://arxiv.org/abs/2510.23730) | 2025 | `external, user, episodic, semantic, procedural` | User-centric personalization | 增强型 |
+| 62 | [DeepAgent: A General Reasoning Agent with Scalable Toolsets](https://arxiv.org/abs/2510.21618) | 2025 | `external, agent, episodic, working` | Procedural / skill memory | 新增型偏增强 |
+| 63 | [Memo: Training Memory-Efficient Embodied Agents with Reinforcement Learning](https://arxiv.org/abs/2510.19732) | 2025 | `external, agent, working` | Sensory / multimodal memory | 新增型 |
+| 64 | [LightMem: Lightweight and Efficient Memory-Augmented Generation](https://arxiv.org/abs/2510.18866) | 2025 | `external, user, sensory, semantic, working` | User-centric personalization | 增强型 |
+| 65 | [Branch-and-Browse: Efficient and Controllable Web Exploration with Tree-Structured Reasoning and Action Memory](https://arxiv.org/abs/2510.19838) | 2025 | `external, agent, episodic, working` | Working memory / scratchpad | 增强型 |
+| 66 | [RGMem: Renormalization Group-based Memory Evolution for Language Agent User Profile](https://arxiv.org/abs/2510.16392) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 67 | [D-SMART: Enhancing LLM Dialogue Consistency via Dynamic Structured Memory And Reasoning Tree](https://arxiv.org/abs/2510.13363) | 2025 | `external, user, semantic, working` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 68 | [MemoTime: Memory-Augmented Temporal Knowledge Graph Enhanced Large Language Model Reasoning](https://arxiv.org/abs/2510.13614) | 2025 | `external, agent, episodic` | Semantic abstraction / memory card | 增强型 |
+| 69 | [Memory As Action: Autonomous Context Curation for Long-Horizon Agentic Tasks](https://arxiv.org/abs/2510.12635) | 2025 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 70 | [PISA: A Pragmatic Psych-Inspired Unified Memory System for Enhanced AI Agency](https://arxiv.org/abs/2510.15966) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 71 | [EpiCache: Episodic KV Cache Management for Long Conversational Question Answering](https://arxiv.org/abs/2509.17396?) | 2025 | `external, user, working` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 72 | [Preference-Aware Memory Update for Long-Term LLM Agents](https://arxiv.org/abs/2510.09720) | 2025 | `semantic` | User-centric personalization | 增强型 |
+| 73 | [Seeing, Listening, Remembering, and Reasoning: A Multimodal Agent with Long-Term Memory](https://arxiv.org/abs/2508.09736) | 2025 | `external, agent, episodic, semantic` | 外部长时记忆 substrate | 增强型 |
+| 74 | [Multiple Memory Systems for Enhancing the Long-term Memory of Agent](https://arxiv.org/abs/2508.15294) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 75 | [MemWeaver: A Hierarchical Memory from Textual Interactive Behaviors for Personalized Generation](https://arxiv.org/abs/2510.07713) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 76 | [Scaling LLM Multi-turn RL with End-to-end Summarization-based Context Management](https://arxiv.org/abs/2510.06727) | 2025 | `external, agent, working` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 77 | [ToolMem: Enhancing Multimodal Agents with Learnable Tool Capability Memory](https://arxiv.org/abs/2510.06664) | 2025 | `external, agent, episodic, semantic` | Procedural / skill memory | 新增型偏增强 |
+| 78 | [CAM: A Constructivist View of Agentic Memory for LLM-Based Reading Comprehension](https://arxiv.org/abs/2510.05520) | 2025 | `external, agent, semantic, working` | 外部长时记忆 substrate | 增强型 |
+| 79 | [LEGOMem: Modular Procedural Memory for Multi-agent LLM Systems for Workflow Automation](https://arxiv.org/abs/2510.04851) | 2025 | `external, agent, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 80 | [Pretraining with hierarchical memories: separating long-tail and common knowledge](https://arxiv.org/abs/2510.02375) | 2025 | `internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 81 | [ACON: Optimizing Context Compression for Long-horizon LLM Agents](https://arxiv.org/abs/2510.00615) | 2025 | `external, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 82 | [Mem-α: Learning Memory Construction via Reinforcement Learning](https://arxiv.org/abs/2509.25911) | 2025 | `external, user, episodic, semantic, working` | User-centric personalization | 增强型 |
+| 83 | [ReasoningBank: Scaling Agent Self-Evolving with Reasoning Memory](https://arxiv.org/abs/2509.25140v1) | 2025 | `external, user, procedural` | User-centric personalization | 增强型 |
+| 84 | [ViReSkill: Vision-Grounded Replanning with Skill Memory for LLM-Based Planning in Lifelong Robot Learning](https://arxiv.org/abs/2509.24219v1) | 2025 | `external, agent, procedural` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 85 | [Look Back to Reason Forward: Revisitable Memory for Long-Context LLM Agents](https://arxiv.org/abs/2509.23040) | 2025 | `external, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 86 | [ReSum: Unlocking Long-Horizon Search Intelligence via Context Summarization](https://arxiv.org/abs/2509.13313) | 2025 | `external, agent, working` | Retrieval routing / gating / shard probing | 增强型 |
+| 87 | [Memory-R1: Enhancing Large Language Model Agents to Manage and Utilize Memories via Reinforcement Learning](https://arxiv.org/abs/2508.19828?) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 88 | [Learn to Memorize: Optimizing LLM-based Agents with Adaptive Memory Framework](https://arxiv.org/abs/2508.16629) | 2025 | `external, agent, episodic` | 外部长时记忆 substrate | 增强型 |
+| 89 | [Memp: Exploring Agent Procedural Memory](https://arxiv.org/abs/2508.06433?) | 2025 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 90 | [Nemori: Self-Organizing Agent Memory Inspired by Cognitive Science](https://arxiv.org/abs/2508.03341) | 2025 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 91 | [MLP Memory: A Retriever-Pretrained Memory for Large Language Models](https://arxiv.org/abs/2508.01832v2) | 2025 | `internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 92 | [MemInsight: Autonomous Memory Augmentation for LLM Agents](https://arxiv.org/abs/2503.21760) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 93 | [In Prospect and Retrospect: Reflective Memory Management for Long-term Personalized Dialogue Agents](https://arxiv.org/abs/2503.08026) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 94 | [MemAgent: Reshaping Long-Context LLM with Multi-Conv RL-based Memory Agent](https://arxiv.org/abs/2507.02259v1) | 2025 | `external, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 95 | [MIRIX: Multi-Agent Memory System for LLM-Based Agents](https://arxiv.org/abs/2507.07957) | 2025 | `external, user, episodic, semantic, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 96 | [Evaluating memory in llm agents via incremental multi-turn interactions](https://arxiv.org/abs/2507.05257) | 2025 | `-` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 97 | [MemBench: Towards More Comprehensive Evaluation on the Memory of LLM-based Agents](https://arxiv.org/abs/2506.21605) | 2025 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 98 | [G-Memory: Tracing Hierarchical Memory for Multi-Agent Systems](https://arxiv.org/abs/2506.07398) | 2025 | `external, agent, episodic, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 99 | [BABILong: Testing the Limits of LLMs with Long Context Reasoning-in-a-Haystack](https://arxiv.org/abs/2406.10149) | 2025 | `-` | Compression / compaction / abstraction balancing | 增强型 |
+| 100 | [Memory OS of AI Agent](https://arxiv.org/abs/2506.06326) | 2025 | `external, user, episodic, semantic, working` | 外部长时记忆 substrate | 增强型 |
+| 101 | [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) | 2025 | `external, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 102 | [Rethinking Memory in AI: Taxonomy, Operations, Topics, and Future Directions](https://arxiv.org/abs/2505.00675) | 2025 | `-` | Semantic abstraction / memory card | 增强型 |
+| 103 | [Collaborative Memory: Multi-User Memory Sharing in LLM Agents with Dynamic Access Control](https://arxiv.org/abs/2505.18279) | 2025 | `external, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 104 | [Pre-training Limited Memory Language Models with Internal and External Knowledge](https://arxiv.org/abs/2505.15962) | 2025 | `external, internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 105 | [How Memory Management Impacts LLM Agents: An Empirical Study of Experience-Following Behavior](https://arxiv.org/abs/2505.16067) | 2025 | `external, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 106 | [ReSurgSAM2: Referring Segment Anything in Surgical Video via Credible Long-term Tracking](https://arxiv.org/abs/2505.08581) | 2025 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 107 | [Long Term Memory : The Foundation of AI Self-Evolution](https://arxiv.org/abs/2410.15665) | 2025 | `-` | Semantic abstraction / memory card | 增强型 |
+| 108 | [Procedural Memory Is Not All You Need: Bridging Cognitive Gaps in LLM-Based Agents](https://arxiv.org/abs/2505.03434) | 2025 | `external, user, procedural` | User-centric personalization | 增强型 |
+| 109 | [Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory](https://arxiv.org/abs/2504.19413) | 2025 | `external, user, semantic` | 外部长时记忆 substrate | 增强型 |
+| 110 | [Inducing Programmatic Skills for Agentic Tasks](https://arxiv.org/abs/2504.06821) | 2025 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 111 | [SkillWeaver: Web Agents can Self-Improve by Discovering and Honing Skills](https://arxiv.org/abs/2504.07079) | 2025 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 112 | [Advances and Challenges in Foundation Agents: From Brain-Inspired Intelligence to Evolutionary, Collaborative, and Safe Systems](https://arxiv.org/abs/2504.01990) | 2025 | `-` | Semantic abstraction / memory card | 增强型 |
+| 113 | [VideoScan: Enabling Efficient Streaming Video Understanding via Frame-level Semantic Carriers](https://arxiv.org/abs/2503.09387) | 2025 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 114 | [Online Dense Point Tracking with Streaming Memory](https://arxiv.org/abs/2503.06471) | 2025 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 115 | [Enhancing Reasoning with Collaboration and Memory](https://arxiv.org/abs/2503.05944) | 2025 | `external, agent, episodic` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 116 | [Interpersonal Memory Matters: A New Task for Proactive Dialogue Utilizing Conversational History](https://arxiv.org/abs/2503.05150) | 2025 | `external, user, episodic` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 117 | [LM2: Large Memory Models for Long Context Reasoning](https://arxiv.org/abs/2502.06049) | 2025 | `internal, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 118 | [EgoLife: Towards Egocentric Life Assistant](https://arxiv.org/abs/2503.03803) | 2025 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 119 | [SeCom: On Memory Construction and Retrieval for Personalized Conversational Agents](https://arxiv.org/abs/2502.05589) | 2025 | `external, user, episodic` | Retrieval routing / gating / shard probing | 增强型 |
+| 120 | [Streaming Video Question-Answering with In-context Video KV-Cache Retrieval](https://arxiv.org/abs/2503.00540) | 2025 | `external, agent, sensory` | Retrieval routing / gating / shard probing | 增强型 |
+| 121 | [Echo: A Large Language Model with Temporal Episodic Memory](https://arxiv.org/abs/2502.16090) | 2025 | `internal, user, episodic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 122 | [From RAG to Memory: Non-Parametric Continual Learning for Large Language Models](https://arxiv.org/abs/2502.14802) | 2025 | `external, agent, semantic` | Evaluation / benchmark / policy learning | 新增型 |
+| 123 | [MMRC: A Large-Scale Benchmark for Understanding Multimodal Large Language Model in Real-World Conversation](https://arxiv.org/abs/2502.11903) | 2025 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 124 | [A-Mem: Agentic Memory for LLM Agents](https://arxiv.org/abs/2502.12110) | 2025 | `external, user, semantic` | 外部长时记忆 substrate | 增强型 |
+| 125 | [R3Mem: Bridging Memory Retention and Retrieval via Reversible Compression](https://arxiv.org/abs/2502.15957) | 2025 | `external, agent, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 126 | [Classroom Simulacra: Building Contextual Student Generative Agents in Online Education for Learning Behavioral Simulation](https://arxiv.org/abs/2502.02780) | 2025 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 127 | [M+: Extending MemoryLLM with Scalable Long-Term Memory](https://arxiv.org/abs/2502.00592) | 2025 | `internal, agent, working` | 外部长时记忆 substrate | 增强型 |
+| 128 | [ChunkKV: Semantic-Preserving KV Cache Compression for Efficient Long-Context LLM Inference](https://arxiv.org/abs/2502.00299) | 2025 | `internal, agent, working` | Compression / compaction / abstraction balancing | 增强型 |
+| 129 | [TeachTune: Reviewing Pedagogical Agents Against Diverse Student Profiles with Simulated Students](https://arxiv.org/abs/2410.04078) | 2025 | `external, agent` | User-centric personalization | 增强型 |
+| 130 | [Streaming Video Understanding and Multi-round Interaction with Memory-enhanced Knowledge](https://arxiv.org/abs/2501.13468) | 2025 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 131 | [SRMT: Shared Memory for Multi-agent Life-long Pathfinding](https://arxiv.org/abs/2501.13200) | 2025 | `internal, agent, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 132 | [Zep: a temporal knowledge graph architecture for agent memory](https://arxiv.org/abs/2501.13956) | 2025 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 133 | [Titans: Learning to Memorize at Test Time](https://arxiv.org/abs/2501.00663) | 2024 | `internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 134 | [Longmemeval: Benchmarking chat assistants on long-term interactive memory](https://arxiv.org/abs/2410.10813) | 2024 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 135 | [RET-LLM: Towards a General Read-Write Memory for Large Language Models](https://arxiv.org/abs/2305.14322) | 2024 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 136 | [PolySkill: Learning Generalizable Skills Through Polymorphic Abstraction](https://arxiv.org/abs/2510.15863) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 137 | [From Isolated Conversations to Hierarchical Schemas: Dynamic Tree Memory Representation for LLMs](https://arxiv.org/abs/2410.14052) | 2024 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 138 | [Personalized Large Language Model Assistant with Evolving Conditional Memory](https://arxiv.org/abs/2312.17257) | 2024 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 139 | [Agents Thinking Fast and Slow: A Talker-Reasoner Architecture](https://arxiv.org/abs/2410.08328) | 2024 | `external, user, working` | User-centric personalization | 增强型 |
+| 140 | [Self-updatable large language models by integrating context into model parameters](https://arxiv.org/abs/2410.00487) | 2024 | `internal, user, semantic` | User-centric personalization | 增强型 |
+| 141 | [WALT: Web Agents that Learn Tools](https://arxiv.org/abs/2510.01524) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 142 | [VideoAgent: A Memory-Augmented Multimodal Agent for Video Understanding](https://arxiv.org/abs/2403.11481) | 2024 | `external, agent, episodic, semantic` | Sensory / multimodal memory | 新增型 |
+| 143 | [MemSim: A Bayesian Simulator for Evaluating Memory of LLM-based Personal Assistants](https://arxiv.org/abs/2409.20163) | 2024 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 144 | [Crafting Personalized Agents through Retrieval-Augmented Generation on Editable Memory Graphs](https://arxiv.org/abs/2409.19401) | 2024 | `external, user, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 145 | [MADial-Bench: Towards Real-world Evaluation of Memory-Augmented Dialogue Generation](https://arxiv.org/abs/2409.15240) | 2024 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 146 | [Agent Workflow Memory](https://arxiv.org/abs/2409.07429) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 147 | [MemoRAG: Boosting Long Context Processing with Global Memory-Enhanced Retrieval Augmentation](https://arxiv.org/abs/2409.05591) | 2024 | `external, internal, agent, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 148 | [VideoLLM-MoD: Efficient Video-Language Streaming with Mixture-of-Depths Vision Computation](https://arxiv.org/abs/2408.16730) | 2024 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 149 | [AI-native Memory: A Pathway from LLMs Towards AGI](https://arxiv.org/abs/2406.18312) | 2024 | `-` | Semantic abstraction / memory card | 增强型 |
+| 150 | [SAM 2: Segment Anything in Images and Videos](https://arxiv.org/abs/2408.00714) | 2024 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 151 | [VIPeR: Visual Incremental Place Recognition with Adaptive Mining and Continual Learning](https://arxiv.org/abs/2407.21416) | 2024 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 152 | [A Human-Inspired Reading Agent with Gist Memory of Very Long Contexts](https://arxiv.org/abs/2402.09727) | 2024 | `external, agent, episodic` | Compression / compaction / abstraction balancing | 增强型 |
+| 153 | [FinCon: A Synthesized LLM Multi-Agent System with Conceptual Verbal Reinforcement for Enhanced Financial Decision Making](https://arxiv.org/abs/2407.06567) | 2024 | `external, agent, episodic, working, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 154 | [MemoCRS: Memory-enhanced Sequential Conversational Recommender Systems with Large Language Models](https://arxiv.org/abs/2407.04960) | 2024 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 155 | [Memory3 : Language Modeling with Explicit Memory](https://arxiv.org/abs/2407.01178) | 2024 | `external, internal, agent, working` | Working memory / scratchpad | 增强型 |
+| 156 | [Lifelong Robot Library Learning: Bootstrapping Composable and Generalizable Skills for Embodied Control with Language Models](https://arxiv.org/abs/2406.18746) | 2024 | `external, agent, procedural` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 157 | [VideoLLM-online: Online Video Large Language Model for Streaming Video](https://arxiv.org/abs/2406.11816) | 2024 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 158 | [Hello Again! LLM-powered Personalized Agent for Long-term Dialogue](https://arxiv.org/abs/2406.05925) | 2024 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 159 | [Buffer of Thoughts: Thought-Augmented Reasoning with Large Language Models](https://arxiv.org/abs/2406.04271) | 2024 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 160 | [Mobile-Agent-v2: Mobile Device Operation Assistant with Effective Navigation via Multi-Agent Collaboration](https://arxiv.org/abs/2406.01014) | 2024 | `external, agent, sensory, episodic` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 161 | [AutoManual: Constructing Instruction Manuals by LLM Agents via Interactive Environmental Learning](https://arxiv.org/abs/2405.16247) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 162 | [Streaming Long Video Understanding with Large Language Models](https://arxiv.org/abs/2405.16009) | 2024 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 163 | [WISE: Rethinking the Knowledge Memory for Lifelong Model Editing of Large Language Models](https://arxiv.org/abs/2405.14768) | 2024 | `internal, agent, semantic` | Episodic consolidation / narrative memory | 新增型偏增强 |
+| 164 | [Rethinking Agent Design: From Top-Down Workflows to Bottom-Up Skill Evolution](https://arxiv.org/abs/2505.17673) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 165 | [HMT: Hierarchical Memory Transformer for Efficient Long Context Language Processing](https://arxiv.org/abs/2405.06067) | 2024 | `external, agent, sensory` | Compression / compaction / abstraction balancing | 增强型 |
+| 166 | [Self-Organized Agents: A LLM Multi-Agent Framework toward Ultra Large-Scale Code Generation and Optimization](https://arxiv.org/abs/2404.02183) | 2024 | `external, agent, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 167 | ["My agent understands me better": Integrating Dynamic Human-like Memory Recall and Consolidation in LLM-Based](https://arxiv.org/abs/2404.00573) | 2024 | `external, user, episodic, semantic` | Retrieval routing / gating / shard probing | 增强型 |
+| 168 | [EduAgent: Generative Student Agents in Learning](https://arxiv.org/abs/2404.07963) | 2024 | `external, agent` | Agent-centric experience memory | 新增型偏增强 |
+| 169 | [AutoGuide: Automated Generation and Selection of Context-Aware Guidelines for Large Language Model Agents](https://arxiv.org/abs/2403.08978v2) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 170 | [Online Adaptation of Language Models with a Memory of Amortized Contexts](https://arxiv.org/abs/2403.04317) | 2024 | `internal, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 171 | [Evaluating Very Long-Term Conversational Memory of LLM Agents](https://arxiv.org/abs/2402.17753) | 2024 | `-` | Cross-turn carryover / anti-redundancy | 新增型 |
+| 172 | [Beyond Retrieval: Embracing Compressive Memory in Real-World Long-Term Conversations](https://arxiv.org/abs/2402.11975) | 2024 | `external, user, episodic` | Retrieval routing / gating / shard probing | 增强型 |
+| 173 | [In Search of Needles in a 11M Haystack: Recurrent Memory Finds What LLMs Miss](https://arxiv.org/abs/2402.10790) | 2024 | `-` | Retrieval routing / gating / shard probing | 增强型 |
+| 174 | [User Behavior Simulation with Large Language Model based Agents](https://arxiv.org/abs/2306.02552v3) | 2024 | `external, user, sensory, semantic, working` | User-centric personalization | 增强型 |
+| 175 | [MemGPT: Towards LLMs as Operating Systems](https://arxiv.org/abs/2310.08560) | 2024 | `external, internal, user` | User-centric personalization | 增强型 |
+| 176 | [MEMORYLLM: Towards Self-Updatable Large Language Models](https://arxiv.org/abs/2402.04624) | 2024 | `internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 177 | [QuantAgent: Seeking Holy Grail in Trading by Self-Improving Large Language Model](https://arxiv.org/abs/2402.03755) | 2024 | `external, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 178 | [RAP: Retrieval-Augmented Planning with Contextual Memory for Multimodal LLM Agents](https://arxiv.org/abs/2402.03610) | 2024 | `external, agent, episodic` | Retrieval routing / gating / shard probing | 增强型 |
+| 179 | [A Multi-Agent Conversational Recommender System](https://arxiv.org/abs/2402.01135) | 2024 | `external, user, episodic, semantic, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 180 | [War and Peace (WarAgent): LLM-based Multi-Agent Simulation of World Wars](https://arxiv.org/abs/2311.17227) | 2024 | `external, agent, episodic` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 181 | [Developing ChemDFM as a Large Language Foundation Model for Chemistry](https://arxiv.org/abs/2401.14818) | 2024 | `internal, agent, semantic` | Semantic abstraction / memory card | 增强型 |
+| 182 | [TroVE: Inducing Verifiable and Efficient Toolboxes for Solving Programmatic Tasks](https://arxiv.org/abs/2401.12869) | 2024 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 183 | [From LLM to Conversational Agent: A Memory Enhanced Architecture with Fine-Tuning of Large Language Models](https://arxiv.org/abs/2401.02777) | 2024 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 184 | [FinMem: A Performance-Enhanced LLM Trading Agent with Layered Memory and Character Design](https://arxiv.org/abs/2311.13743) | 2023 | `external, agent, semantic, working` | Working memory / scratchpad | 增强型 |
+| 185 | [Think-in-Memory: Recalling and Post-thinking Enable LLMs with Long-Term Memory](https://arxiv.org/abs/2311.08719) | 2023 | `external, agent, episodic` | Retrieval routing / gating / shard probing | 增强型 |
+| 186 | [JARV IS-1: Open-world Multi-task Agents with Memory-Augmented Multimodal Language Models](https://arxiv.org/abs/2311.05997) | 2023 | `external, agent, episodic, semantic` | Sensory / multimodal memory | 新增型 |
+| 187 | [Knowledge Editing for Large Language Models: A Survey](https://arxiv.org/abs/2310.16218) | 2023 | `-` | Evaluation / benchmark / policy learning | 新增型 |
+| 188 | [Character-LLM: A Trainable Agent for Role-Playing](https://arxiv.org/abs/2310.10158) | 2023 | `internal, user, semantic` | User-centric personalization | 增强型 |
+| 189 | [AgentCF: Collaborative Learning with Autonomous Language Agents for Recommender Systems](https://arxiv.org/abs/2310.09233) | 2023 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 190 | [GameGPT: Multi-agent Collaborative Framework for Game Development](https://arxiv.org/abs/2310.08067v1) | 2023 | `external, agent, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 191 | [MetaAgents: Large Language Model Based Agents for Decision-making on Teaming](https://arxiv.org/abs/2310.06500) | 2023 | `external, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 192 | [RoleLLM: Benchmarking, Eliciting, and Enhancing Role-Playing Abilities of Large Language Models](https://arxiv.org/abs/2310.00746) | 2023 | `external, internal, user, semantic` | Evaluation / benchmark / policy learning | 新增型 |
+| 193 | [AutoAgents: A Framework for Automatic Agent Generation](https://arxiv.org/abs/2309.17288) | 2023 | `external, agent, episodic, working, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 194 | [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) | 2023 | `internal, agent, working` | Working memory / scratchpad | 增强型 |
+| 195 | [TradingGPT: Multi-Agent System with Layered Memory and Distinct Characters for Enhanced Financial Trading Performance](https://arxiv.org/abs/2309.03736) | 2023 | `external, agent, semantic, working` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 196 | [Recommender AI Agent: Integrating Large Language Models for Interactive](https://arxiv.org/abs/2308.16505) | 2023 | `external, internal, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 197 | [RecMind: Large Language Model Powered Agent For Recommendation](https://arxiv.org/abs/2308.14296) | 2023 | `external, internal, user, semantic, working` | User-centric personalization | 增强型 |
+| 198 | [Black-box Unsupervised Domain Adaptation with Bi-directional Atkinson-Shiffrin Memory](https://arxiv.org/abs/2308.13236) | 2023 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 199 | [MemoChat: Tuning LLMs to Use Memos for Consistent Long-Range Open-Domain Conversation](https://arxiv.org/abs/2308.08239) | 2023 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 200 | [Context-Aware Planning and Environment-Aware Memory for Instruction Following Embodied Agents](https://arxiv.org/abs/2308.07241) | 2023 | `external, agent, sensory, episodic, working` | Sensory / multimodal memory | 新增型 |
+| 201 | [ChatHaruhi: Reviving Anime Character in Reality via Large Language Model](https://arxiv.org/abs/2308.09597) | 2023 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 202 | [Retroformer: Retrospective Large Language Agents with Policy Gradient Optimization](https://arxiv.org/abs/2308.02151) | 2023 | `external, user, procedural` | User-centric personalization | 增强型 |
+| 203 | [MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework](https://arxiv.org/abs/2308.00352) | 2023 | `external, agent, procedural` | Multi-agent handoff / delegated evidence extraction | 新增型偏增强 |
+| 204 | [XMem++: Production-level Video Segmentation From Few Annotated Frames](https://arxiv.org/abs/2307.15958) | 2023 | `external, agent, sensory` | Sensory / multimodal memory | 新增型 |
+| 205 | [S3 : Social-network Simulation System with Large Language Model-Empowered Agents](https://arxiv.org/abs/2307.14984) | 2023 | `external, user, episodic` | User-centric personalization | 增强型 |
+| 206 | [GridMM: Grid Memory Map for Vision-and-Language Navigation](https://arxiv.org/abs/2307.12907) | 2023 | `internal, agent, sensory, working` | Sensory / multimodal memory | 新增型 |
+| 207 | [ChatDev: Communicative Agents for Software Development](https://arxiv.org/abs/2307.07924) | 2023 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 208 | [Synapse: Trajectory-as-Exemplar Prompting with Memory for Computer Control](https://arxiv.org/abs/2306.07863) | 2023 | `external, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 209 | [Augmenting Language Models with Long-Term Memory](https://arxiv.org/abs/2306.07174) | 2023 | `external, internal, agent, working` | 外部长时记忆 substrate | 增强型 |
+| 210 | [ChatDB: Augmenting LLMs with Databases as Their Symbolic Memory](https://arxiv.org/abs/2306.03901) | 2023 | `external, agent, semantic` | 外部长时记忆 substrate | 增强型 |
+| 211 | [Ghost in the Minecraft: Generally Capable Agents for Open-World Environments via Large Language Models with Text-based Knowledge and Memory](https://arxiv.org/abs/2305.17144) | 2023 | `external, agent, episodic, semantic` | Semantic abstraction / memory card | 增强型 |
+| 212 | [AdaPlanner: Adaptive Planning from Feedback with Language Models](https://arxiv.org/abs/2305.16653) | 2023 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 213 | [Reasoning with Language Model is Planning with World Model](https://arxiv.org/abs/2305.14992) | 2023 | `external, agent, working` | Working memory / scratchpad | 增强型 |
+| 214 | [Voyager: An Open-Ended Embodied Agent with Large Language Models](https://arxiv.org/abs/2305.16291) | 2023 | `external, agent, procedural` | Procedural / skill memory | 新增型偏增强 |
+| 215 | [MemoryBank: Enhancing Large Language Models with Long-Term Memory](https://arxiv.org/abs/2305.10250) | 2023 | `external, user, episodic, semantic` | User-centric personalization | 增强型 |
+| 216 | [Prompted LLMs as Chatbot Modules for Long Open-domain Conversation](https://arxiv.org/abs/2305.04533) | 2023 | `external, user, working` | User-centric personalization | 增强型 |
+| 217 | [Recursively Summarizing Enables Long-Term Dialogue Memory in Large Language Models](https://arxiv.org/abs/2308.15022v3) | 2023 | `external, user, semantic` | User-centric personalization | 增强型 |
+| 218 | [SCM:Enhancing Large Language Model with Self-Controlled Memory Framework](https://arxiv.org/abs/2304.13343) | 2023 | `external, agent, episodic` | 外部长时记忆 substrate | 增强型 |
+| 219 | [Generative Agents: Interactive Simulacra of Human Behavior](https://arxiv.org/abs/2304.03442) | 2023 | `external, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 220 | [Reflexion: Language Agents with Verbal Reinforcement Learning](https://arxiv.org/abs/2303.11366) | 2023 | `external, agent, episodic` | Agent-centric experience memory | 新增型偏增强 |
+| 221 | [Beyond Goldfish Memory∗: Long-Term Open-Domain Conversation](https://arxiv.org/abs/2107.07567) | 2021 | `-` | Semantic abstraction / memory card | 增强型 |
