@@ -25,7 +25,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openjiuwen = ["openjiuwen"]   # framework integration
+openjiuwen = [
+    "openjiuwen",
+    "SQLAlchemy>=2.0.0",
+    "asyncpg>=0.29.0",
+]   # framework integration
 pulsar = ["pulsar-client>=3.4.0"]
 neo4j = ["neo4j>=5.20.0"]
 milvus = ["pymilvus>=2.4.0"]

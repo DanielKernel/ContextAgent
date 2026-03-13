@@ -150,6 +150,45 @@ print(json.dumps(sys.argv[1], ensure_ascii=True))
 PY
 }
 
+show_recent_log_tail() {
+  local log_path="$1"
+  local line_count="${2:-80}"
+  if [[ ! -f "$log_path" ]]; then
+    warn "尚未生成服务日志：$log_path"
+    return 0
+  fi
+  echo ""
+  echo "----- $log_path (tail -n $line_count) -----"
+  tail -n "$line_count" "$log_path"
+  echo "----- end log tail -----"
+}
+
+load_context_http_setting() {
+  local file_path="$1"
+  local nested_expr="$2"
+  local flat_expr="$3"
+  local value=""
+  if [[ -f "$file_path" ]]; then
+    value="$(load_yaml_field "$file_path" "$nested_expr")"
+    if [[ -z "$value" ]]; then
+      value="$(load_yaml_field "$file_path" "$flat_expr")"
+    fi
+  fi
+  echo "$value"
+}
+
+diagnose_start_failure() {
+  local pid="$1"
+  if kill -0 "$pid" 2>/dev/null; then
+    warn "升级后的服务进程仍在运行，但健康检查未通过：PID=$pid"
+  else
+    warn "升级后的服务进程已提前退出：PID=$pid"
+    rm -f "$PID_FILE"
+  fi
+  warn "最近日志如下：$LOG_FILE"
+  show_recent_log_tail "$LOG_FILE" 80
+}
+
 find_pg_client_bin() {
   local bin_name="$1"
   if command -v "$bin_name" >/dev/null 2>&1; then
@@ -223,8 +262,8 @@ else
   CURRENT_BACKEND=""
 fi
 VECTOR_BACKEND="${VECTOR_BACKEND:-${CURRENT_BACKEND:-pgvector}}"
-HTTP_HOST="$( [[ -f "$CONTEXT_AGENT_CONFIG_PATH" ]] && load_yaml_field "$CONTEXT_AGENT_CONFIG_PATH" "http_host" || true )"
-HTTP_PORT="$( [[ -f "$CONTEXT_AGENT_CONFIG_PATH" ]] && load_yaml_field "$CONTEXT_AGENT_CONFIG_PATH" "http_port" || true )"
+HTTP_HOST="$(load_context_http_setting "$CONTEXT_AGENT_CONFIG_PATH" "http.host" "http_host")"
+HTTP_PORT="$(load_context_http_setting "$CONTEXT_AGENT_CONFIG_PATH" "http.port" "http_port")"
 HTTP_HOST="${HTTP_HOST:-0.0.0.0}"
 HTTP_PORT="${PORT_OVERRIDE:-${HTTP_PORT:-8080}}"
 
@@ -330,7 +369,9 @@ if [[ "$VECTOR_BACKEND" == "pgvector" && -n "$PG_DSN" ]]; then
   PG_SCHEMA="${PG_SCHEMA:-public}"
   PG_TABLE="${PG_TABLE:-ltm_memory}"
   if PSQL_BIN="$(find_pg_client_bin psql)"; then
-    "$PSQL_BIN" "$PG_DSN" <<SQL >/dev/null
+    "$PSQL_BIN" -q "$PG_DSN" <<SQL >/dev/null
+SET client_min_messages TO WARNING;
+
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS ${PG_SCHEMA}.${PG_TABLE} (
@@ -379,17 +420,27 @@ if [[ "$SHOULD_START" == true ]]; then
   echo "$NEW_PID" > "$PID_FILE"
 
   info "等待服务健康检查..."
+  STARTED=false
   for _ in $(seq 1 20); do
-    if curl -sf "http://127.0.0.1:${HTTP_PORT}/health" >/dev/null 2>&1; then
+    if curl -sf --max-time 2 "http://127.0.0.1:${HTTP_PORT}/health" >/dev/null 2>&1; then
       success "升级成功，服务已恢复：http://127.0.0.1:${HTTP_PORT}"
       echo "  升级备份：$BACKUP_DIR"
       echo "  回滚配置：bash scripts/upgrade.sh --rollback $BACKUP_DIR"
+      STARTED=true
       exit 0
+    fi
+    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+      diagnose_start_failure "$NEW_PID"
+      break
     fi
     sleep 1
   done
 
-  warn "健康检查失败，正在自动回滚配置..."
+  if [[ "$STARTED" != true ]]; then
+    warn "升级后的服务未通过健康检查，正在自动回滚配置..."
+    diagnose_start_failure "$NEW_PID"
+  fi
+
   kill "$NEW_PID" 2>/dev/null || true
   rm -f "$PID_FILE"
   rollback_from_backup "$BACKUP_DIR"
@@ -399,8 +450,20 @@ if [[ "$SHOULD_START" == true ]]; then
   "$VENV_DIR/bin/python3" -m uvicorn context_agent.api.http_handler:app \
     --host "$HTTP_HOST" --port "$HTTP_PORT" \
     > "$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
-  die "升级后的服务未通过健康检查，配置已回滚。数据库逻辑备份保留在：$BACKUP_DIR/postgres"
+  ROLLBACK_PID=$!
+  echo "$ROLLBACK_PID" > "$PID_FILE"
+  for _ in $(seq 1 20); do
+    if curl -sf --max-time 2 "http://127.0.0.1:${HTTP_PORT}/health" >/dev/null 2>&1; then
+      die "升级后的服务未通过健康检查，配置已回滚并恢复启动。数据库逻辑备份保留在：$BACKUP_DIR/postgres"
+    fi
+    if ! kill -0 "$ROLLBACK_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  warn "回滚后的服务也未通过健康检查。"
+  diagnose_start_failure "$ROLLBACK_PID"
+  die "升级后的服务未通过健康检查，配置已回滚，但回滚后的服务仍启动失败。数据库逻辑备份保留在：$BACKUP_DIR/postgres"
 fi
 
 echo ""

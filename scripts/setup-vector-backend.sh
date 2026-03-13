@@ -35,6 +35,21 @@ done
 CONFIG_DIR="$(dirname "$CONFIG_PATH")"
 mkdir -p "$CONFIG_DIR"
 
+find_python() {
+  local candidate
+  for candidate in python3.13 python3.12 python3.11 python3; do
+    if command -v "$candidate" &>/dev/null; then
+      if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+        command -v "$candidate"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+PYTHON3="$(find_python)" || die "未找到 Python 3.11+"
+
 find_linux_pg_bin_dir() {
   local candidate version fallback_pg_bin_dir=""
 
@@ -91,11 +106,19 @@ backup_existing_config() {
   fi
 }
 
+merge_generated_config() {
+  local template_path="$1"
+  backup_existing_config "$CONFIG_PATH"
+  "$PYTHON3" "$PROJECT_DIR/context_agent/config/migration.py" \
+    --target "$CONFIG_PATH" \
+    --template "$template_path" \
+    --replace-top-level-key vector_store >/dev/null
+}
+
 copy_example_config() {
   local example_file="$PROJECT_DIR/examples/configs/$BACKEND/openjiuwen.yaml"
   [[ -f "$example_file" ]] || die "未找到示例配置：$example_file"
-  backup_existing_config "$CONFIG_PATH"
-  cp "$example_file" "$CONFIG_PATH"
+  merge_generated_config "$example_file"
   success "已生成 openJiuwen 配置：$CONFIG_PATH"
 }
 
@@ -192,7 +215,9 @@ setup_pgvector_backend() {
   "$pg_isready_bin" -h "$pg_socket_dir" -p "$pg_port" >/dev/null 2>&1 || die "PostgreSQL 启动失败，可能是端口 ${pg_port} 已被其他实例占用。请查看日志：${pg_log_file}"
 
   "$createdb_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" "$pg_db_name" >/dev/null 2>&1 || true
-  "$psql_bin" -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" -d "$pg_db_name" <<'SQL' >/dev/null
+  "$psql_bin" -q -w -h "$pg_socket_dir" -p "$pg_port" -U "$pg_user" -d "$pg_db_name" <<'SQL' >/dev/null
+SET client_min_messages TO WARNING;
+
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS ltm_memory (
@@ -212,8 +237,9 @@ CREATE INDEX IF NOT EXISTS idx_ltm_memory_scope_id ON ltm_memory(scope_id);
 CREATE INDEX IF NOT EXISTS idx_ltm_memory_memory_type ON ltm_memory(memory_type);
 SQL
 
-  backup_existing_config "$CONFIG_PATH"
-  cat > "$CONFIG_PATH" <<EOF
+  local generated_config
+  generated_config="$(mktemp "${TMPDIR:-/tmp}/context-agent-openjiuwen.XXXXXX.yaml")"
+  cat > "$generated_config" <<EOF
 user_id: context-agent
 
 llm_config:
@@ -258,6 +284,9 @@ memory_config:
   enable_episodic_memory: true
   enable_summary_memory: true
 EOF
+
+  merge_generated_config "$generated_config"
+  rm -f "$generated_config"
 
   success "pgvector 已完成本地初始化，openJiuwen 配置已写入：${CONFIG_PATH}"
 }

@@ -28,6 +28,8 @@ bash scripts/setup-openclaw.sh
 
 > ContextAgent **只通过 openJiuwen 配置对接向量数据库**，不会在业务代码中直连向量库。
 
+> 重装/重新初始化向量后端时，安装脚本会保留现有 `config/openjiuwen.yaml` 中的 `llm_config`、`embedding_config`、`memory_config` 等已有配置，只更新当前后端所需的 `vector_store` 配置。
+
 > **更多选项：**
 > ```bash
 > bash scripts/install.sh --help
@@ -80,6 +82,8 @@ bash scripts/install.sh --vector-backend qdrant
 bash scripts/install.sh --vector-backend milvus
 ```
 
+如果 `config/openjiuwen.yaml` 已存在，脚本会先生成 `.bak` 备份，再在保留已有 LLM / Embedding / Memory 配置的前提下，仅替换与当前向量后端相关的 `vector_store` 段。
+
 正式默认配置见：
 
 - `config/context_agent.yaml`
@@ -126,7 +130,8 @@ bash scripts/upgrade.sh --rollback .local/upgrade-backups/<timestamp>
 - 升级流程不会重新 `initdb`
 - 不会删除 `.local/postgres` 或 `/var/lib/postgresql/context-agent`
 - 不会在默认流程中执行 destructive DDL
-- 若升级后的健康检查失败，脚本会先回滚配置，再尝试恢复服务
+- 若升级后的健康检查失败，脚本会先打印最近日志，再回滚配置并尝试恢复服务
+- 若回滚后的服务仍无法恢复，脚本会继续输出最近日志，便于定位依赖、配置或端口问题
 
 ### 5 行接入
 

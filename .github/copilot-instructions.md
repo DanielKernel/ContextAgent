@@ -1,107 +1,98 @@
 # Copilot Instructions for ContextAgent
 
-## Project Overview
+## Build, test, and lint commands
 
-ContextAgent 是一个基于 **openJiuwen** 框架构建的上下文代理，为多 Agent 系统提供统一的上下文管理中枢。当前处于项目初始化阶段，尚无业务代码。
+The repository is centered on the Python 3 virtualenv at `.venv` rather than `uv`.
 
-Reference implementation: https://gitcode.com/openJiuwen/agent-core.git
+```bash
+make install
+```
 
----
+Installs the project with `.[dev,openjiuwen]` into `.venv`.
 
-## Architecture
+```bash
+make run-dev
+```
 
-The system is designed around four core operations:
+Starts the FastAPI app with `uvicorn context_agent.api.http_handler:app --reload --host 0.0.0.0 --port 8080`.
 
-- **Write** – Persist key context outside the main context window (scratchpad, external memory files, structured notes)
-- **Select** – Pull relevant context back into the window on demand (just-in-time retrieval, agentic search)
-- **Compress** – Summarize, prune, and compact context (rolling summaries, high-fidelity compaction, tool result pruning)
-- **Isolate** – Distribute context load across sub-agents with isolated windows and compressed handoffs
+```bash
+make lint
+make type-check
+make test
+make test-int
+make test-perf
+make test-all
+```
 
-### Memory Tiers
+`make test` runs the unit suite only. `make test-int` and `make test-perf` are split out with pytest markers.
 
-| Tier | Content | Priority |
-|------|---------|----------|
-| Hot  | Current session, recent task state, immediate user preferences | Ultra-low latency |
-| Warm | Phase summaries, recent long-term memories | Recall quality |
-| Cold | Deep historical knowledge, low-frequency relations, external KBs | Capacity |
+For targeted pytest runs, prefer the virtualenv interpreter directly:
 
-### Memory Types (managed separately, not pooled together)
+```bash
+.venv/bin/python3 -m pytest tests/unit/test_aggregator.py
+.venv/bin/python3 -m pytest tests/integration/test_e2e_pipeline.py
+.venv/bin/python3 -m pytest tests/unit/test_settings_config.py::test_build_default_api_router_without_openjiuwen_config
+```
 
-- **Procedural** – Rules, instructions, preferences, constraints ("how to do it")
-- **Episodic** – Historical cases, few-shot examples, past task fragments ("what happened")
-- **Semantic** – Facts, entities, relationships, domain knowledge ("what is known")
+If the virtualenv is already activated, the docs also use:
 
----
+```bash
+python3 -m pytest
+python3 -m pytest tests/unit
+```
 
-## Core Design Principles
+## High-level architecture
 
-1. **Minimum high-signal context** – Inject as little as possible, but enough to complete the current task. Default to lean context.
-2. **Relevance first** – Only inject information strongly relevant to the current task.
-3. **Context ownership** – The context window must serve the current task goal. Prevent historical or irrelevant recalls from hijacking current reasoning.
-4. **Pluggable strategies** – Compression, selection, trimming, and injection strategies must be swappable per scenario—never hardcoded as a single implementation.
-5. **Progressive disclosure** – Prefer incremental, just-in-time context loading over bulk upfront loading.
-6. **Hybrid retrieval** – Combine embedding search, keyword/grep search, hierarchical signals, graph relations, and reranking. Never rely solely on embeddings.
-7. **Tool context governance** – Expose only the tools relevant to the current task. Use retrieval-based tool selection for large toolsets.
+ContextAgent is a FastAPI service that exposes a single context-management pipeline. The module-level ASGI app in `context_agent/api/http_handler.py` calls `build_default_api_router()` from `context_agent/config/openjiuwen.py`, so startup wiring matters as much as the request handlers.
 
----
+The default runtime always creates `WorkingMemoryManager` first. If `config/context_agent.yaml` resolves an `integrations.openjiuwen.config_path` (or `CA_OPENJIUWEN_CONFIG_PATH`) and openJiuwen can be initialized, startup adds:
 
-## Context Failure Modes to Guard Against
+- `OpenJiuwenLTMAdapter` as the long-term memory port
+- `AsyncMemoryProcessor` for queued long-term writes
+- `MemoryOrchestrator` to write to working memory immediately and enqueue long-term persistence
 
-| Failure | Description |
-|---------|-------------|
-| **Context poisoning** | Incorrect information entering context and being amplified across turns |
-| **Context distraction** | Too much context diluting model attention |
-| **Context confusion** | Irrelevant or redundant information interfering with current task judgment |
-| **Context clash** | Conflicting context fragments causing unstable model behavior |
+If openJiuwen is unavailable, the service still starts in working-memory-only mode rather than failing the whole app.
 
-All new context sources, compression strategies, and injection points should be designed with these failure modes in mind.
+The request path is:
 
----
+1. `http_handler.py` accepts `/context` and delegates to `ContextAPIRouter`.
+2. `ContextAPIRouter.handle()` builds an `AggregationRequest` and calls `ContextAggregator`.
+3. `ContextAggregator` gathers long-term memory, working memory, and JIT refs concurrently, then deduplicates, sorts by score, and trims to the token budget.
+4. `ContextAPIRouter` optionally applies `ExposureController` and `ContextHealthChecker`.
+5. Non-raw outputs go through `CompressionStrategyRouter`, which uses `HybridStrategyScheduler` plus the strategy registry. If all compression strategies fail, it degrades to raw concatenation instead of raising.
 
-## Performance Targets
+Retrieval is split across two layers:
 
-- **Critical-path context retrieval: ≤ 300ms**
-- Use caching, tiered retrieval, async pre-processing, and incremental updates on hot paths
-- External dependencies (vector DB, graph DB) must have fallback/degradation strategies
-- Tool outputs must be subject to token budget + pruning to prevent raw results bloating the main context
+- `ContextAggregator` is the main assembly path for `/context`.
+- `TieredMemoryRouter` and `UnifiedSearchCoordinator` implement tiered/hybrid retrieval primitives for hot/warm/cold search and RRF-based fusion.
 
----
+## Key conventions
 
-## Key Interface Contracts (Planned)
+### Configuration is split across two YAML files
 
-When implementing modules, align with these planned interface boundaries:
+`context_agent/config/settings.py` flattens segmented `config/context_agent.yaml` sections such as `service`, `http`, `redis`, `storage`, `llm`, `integrations`, `budgets`, `memory`, `observability`, and `auth` into `Settings`. That file then points to `config/openjiuwen.yaml` for vector-store and openJiuwen memory configuration. Do not bypass this by wiring vector DB settings directly into business code.
 
-- **Context assembly interface** – standardized input from calling agents, unified output context snapshot
-- **Memory adapter layer** – abstraction over openJiuwen built-in memory AND external stores (vector DB, graph DB, document stores)
-- **Strategy interface** – pluggable compression, selection, and trimming algorithms configurable per business scenario
-- **Sub-agent handoff interface** – compressed task summaries passed between orchestrator and sub-agents; sub-agents return only distilled results
-- **External working memory** – structured notes (task plans, key decisions, open questions, risks) persisted outside the main window, re-injected on demand
+### openJiuwen is the only long-term memory integration boundary
 
----
+Long-term memory should go through `OpenJiuwenLTMAdapter` and `build_openjiuwen_ltm_adapter()`. The code intentionally adapts to multiple upstream openJiuwen constructor and method signatures, then bootstraps stores with `register_store()`, `set_config()`, and `set_scope_config()`. New long-term memory features should extend this adapter path instead of talking to pgvector, Milvus, or other stores directly.
 
-## Scratchpad / Working Memory
+### Working memory is session-scoped and survives openJiuwen failures
 
-Both of these patterns must be supported:
+`WorkingMemoryManager` stores session notes and working-memory items in Redis hashes when Redis is available, with in-process dict fallback otherwise. The app relies on that fallback behavior in tests and local bootstrapping, so preserve it when changing storage code.
 
-- **File-based**: tool writes structured notes to external files, re-reads them later
-- **Runtime state object**: structured fields on in-memory state objects during execution
+### Message ingestion classifies memory before persistence
 
-Distinguish working memory (ephemeral task state) from long-term memory (persisted across sessions).
+`MemoryOrchestrator.ingest_messages()` always writes a `ContextItem` into working memory, then selectively enqueues long-term persistence based on lightweight heuristics or an explicit `requested_memory_type`. Procedural, semantic, episodic, and variable memories are handled differently; changes here affect both retrieval behavior and tests.
 
----
+### Hot-tier caching is intentionally narrow
 
-## Retrieval Stack
+`TieredMemoryRouter` only caches `MemoryType.VARIABLE` items in the hot tier. Cache payloads are validated before use, and invalid entries are treated as misses rather than silently trusted.
 
-When implementing retrieval, layer these techniques rather than picking one:
+### Compression strategies are registry-driven
 
-1. Embedding/vector similarity search
-2. Keyword / grep-style search
-3. Filesystem hierarchy and structural signals
-4. Graph relationship traversal
-5. Reranking pass over candidates
+`CompressionStrategyRouter` calls `ensure_default_strategies_registered()` on construction. Built-in strategies are registered through the singleton registry, and scheduler/router behavior assumes those IDs exist. If you add a new strategy, wire it through the registry and scheduler path rather than calling it directly from handlers.
 
----
+### Tests are organized by use-case responsibilities
 
-## openJiuwen Framework
-
-This project extends the openJiuwen agent framework. Before implementing new memory or retrieval integrations, check whether openJiuwen already provides the capability natively. External integrations should go through the unified memory adapter layer, not be coupled directly to business logic.
+`tests/README.md` maps UC001-UC016 to concrete test files. When changing config loading, openJiuwen bootstrap, compression routing, or the end-to-end API flow, update the relevant focused tests instead of only adding a generic regression elsewhere.

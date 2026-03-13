@@ -60,9 +60,57 @@ def merge_missing_values(
     return merged, inserted_paths
 
 
+def merge_preserving_existing(
+    existing: dict[str, Any],
+    defaults: dict[str, Any],
+    *,
+    replace_top_level_keys: set[str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Merge configs while preserving existing values except selected top-level keys.
+
+    This is used when reinstall/bootstrap should keep user-tuned sections like
+    ``llm_config`` and ``embedding_config`` while regenerating a backend-specific
+    section such as ``vector_store``.
+    """
+    replaced = replace_top_level_keys or set()
+    merged = dict(defaults)
+    inserted_paths: list[str] = []
+
+    for key, default_value in defaults.items():
+        if key in replaced:
+            if key not in existing:
+                inserted_paths.append(key)
+            continue
+
+        if key not in existing:
+            inserted_paths.append(key)
+            continue
+
+        existing_value = existing[key]
+        if isinstance(existing_value, dict) and isinstance(default_value, dict):
+            nested_merged, nested_paths = merge_missing_values(
+                existing_value,
+                default_value,
+                path_prefix=key,
+            )
+            merged[key] = nested_merged
+            inserted_paths.extend(nested_paths)
+        else:
+            merged[key] = existing_value
+
+    for key, existing_value in existing.items():
+        if key in replaced or key in merged:
+            continue
+        merged[key] = existing_value
+
+    return merged, inserted_paths
+
+
 def migrate_config_file(
     target_path: str | Path,
     template_path: str | Path,
+    *,
+    replace_top_level_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Merge missing values from a template config into a target config file."""
     target = Path(target_path).expanduser().resolve()
@@ -71,7 +119,11 @@ def migrate_config_file(
     defaults = load_config_mapping(template)
     if target.exists():
         existing = load_config_mapping(target)
-        merged, inserted_paths = merge_missing_values(existing, defaults)
+        merged, inserted_paths = merge_preserving_existing(
+            existing,
+            defaults,
+            replace_top_level_keys=replace_top_level_keys,
+        )
         target.write_text(
             yaml.safe_dump(merged, sort_keys=False, allow_unicode=False),
             encoding="utf-8",
@@ -90,13 +142,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Non-destructively migrate config files.")
     parser.add_argument("--target", required=True, help="Config file to migrate")
     parser.add_argument("--template", required=True, help="Template/default config file")
+    parser.add_argument(
+        "--replace-top-level-key",
+        action="append",
+        dest="replace_top_level_keys",
+        default=[],
+        help="Top-level key to regenerate from the template instead of preserving the existing value",
+    )
     return parser
 
 
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    result = migrate_config_file(args.target, args.template)
+    result = migrate_config_file(
+        args.target,
+        args.template,
+        replace_top_level_keys=set(args.replace_top_level_keys),
+    )
     print(json.dumps(result, ensure_ascii=True))
 
 

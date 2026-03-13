@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from context_agent.config.migration import merge_missing_values, migrate_config_file
+from context_agent.config.migration import (
+    merge_missing_values,
+    merge_preserving_existing,
+    migrate_config_file,
+)
 
 
 def test_merge_missing_values_only_inserts_absent_keys():
@@ -55,3 +59,100 @@ def test_migrate_config_file_creates_target_from_template(tmp_path):
 
     assert result["mode"] == "created"
     assert target.read_text(encoding="utf-8").strip() == "user_id: context-agent"
+
+
+def test_merge_preserving_existing_can_replace_vector_store_only():
+    existing = {
+        "user_id": "custom-user",
+        "llm_config": {
+            "model": "custom-model",
+            "api_key": "${CUSTOM_KEY}",
+        },
+        "embedding_config": {
+            "model": "custom-embedding",
+        },
+        "vector_store": {
+            "backend": "qdrant",
+            "host": "10.0.0.8",
+        },
+    }
+    defaults = {
+        "user_id": "context-agent",
+        "llm_config": {
+            "model": "gpt-4o-mini",
+            "timeout": 30,
+        },
+        "embedding_config": {
+            "model": "text-embedding-3-large",
+            "dimension": 3072,
+        },
+        "vector_store": {
+            "backend": "pgvector",
+            "dsn": "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable",
+        },
+        "memory_config": {
+            "top_k": 10,
+        },
+    }
+
+    merged, inserted = merge_preserving_existing(
+        existing,
+        defaults,
+        replace_top_level_keys={"vector_store"},
+    )
+
+    assert merged["user_id"] == "custom-user"
+    assert merged["llm_config"]["model"] == "custom-model"
+    assert merged["llm_config"]["api_key"] == "${CUSTOM_KEY}"
+    assert merged["llm_config"]["timeout"] == 30
+    assert merged["embedding_config"]["model"] == "custom-embedding"
+    assert merged["embedding_config"]["dimension"] == 3072
+    assert merged["vector_store"] == defaults["vector_store"]
+    assert merged["memory_config"] == {"top_k": 10}
+    assert "memory_config" in inserted
+
+
+def test_migrate_config_file_can_replace_top_level_keys(tmp_path):
+    target = tmp_path / "openjiuwen.yaml"
+    template = tmp_path / "template.yaml"
+    target.write_text(
+        "\n".join(
+            [
+                "llm_config:",
+                "  model: custom-model",
+                "vector_store:",
+                "  backend: qdrant",
+                "  host: 10.0.0.8",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    template.write_text(
+        "\n".join(
+            [
+                "llm_config:",
+                "  model: gpt-4o-mini",
+                "  timeout: 30",
+                "vector_store:",
+                "  backend: pgvector",
+                "  dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config_file(
+        target,
+        template,
+        replace_top_level_keys={"vector_store"},
+    )
+
+    assert result["mode"] == "merged"
+    text = target.read_text(encoding="utf-8")
+    assert "model: custom-model" in text
+    assert "timeout: 30" in text
+    assert "backend: pgvector" in text
+    assert "dsn: postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable" in text
+    assert "host: 10.0.0.8" not in text

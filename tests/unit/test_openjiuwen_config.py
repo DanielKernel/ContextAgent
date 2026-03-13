@@ -6,6 +6,7 @@ import pytest
 
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
+    _build_db_store,
     _expand_env_placeholders,
     _instantiate_long_term_memory,
     _normalize_async_dsn,
@@ -207,3 +208,23 @@ def test_normalize_async_dsn_for_postgres():
     normalized = _normalize_async_dsn(dsn)
 
     assert normalized == "postgresql+asyncpg://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
+
+
+def test_build_db_store_reports_missing_asyncpg(monkeypatch):
+    def _raise_missing_asyncpg(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'asyncpg'", name="asyncpg")
+
+    monkeypatch.setattr(
+        "sqlalchemy.ext.asyncio.create_async_engine",
+        _raise_missing_asyncpg,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        lambda module_name, symbol_name: object,
+    )
+
+    with pytest.raises(ContextAgentError) as exc:
+        _build_db_store({"dsn": "postgresql://localhost/context_agent"})
+
+    assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
+    assert exc.value.details["missing_dependency"] == "asyncpg"

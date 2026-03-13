@@ -99,6 +99,32 @@ ensure_context_agent_config() {
   success "已生成 ContextAgent 配置：$target_path"
 }
 
+show_recent_log_tail() {
+  local log_path="$1"
+  local line_count="${2:-80}"
+  if [[ ! -f "$log_path" ]]; then
+    warn "尚未生成服务日志：$log_path"
+    return 0
+  fi
+  echo ""
+  echo "----- $log_path (tail -n $line_count) -----"
+  tail -n "$line_count" "$log_path"
+  echo "----- end log tail -----"
+}
+
+diagnose_start_failure() {
+  local pid="$1"
+  if kill -0 "$pid" 2>/dev/null; then
+    warn "服务进程仍在运行，但健康检查未通过：PID=$pid"
+  else
+    warn "服务进程已提前退出：PID=$pid"
+    rm -f "$PID_FILE"
+  fi
+  warn "最近日志如下：$LOG_FILE"
+  show_recent_log_tail "$LOG_FILE" 80
+  die "ContextAgent 启动失败。请根据上述日志排查依赖、配置或端口占用问题。"
+}
+
 echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║       ContextAgent 一键安装               ║"
@@ -200,20 +226,29 @@ if $START_SERVICE; then
   "$VENV_DIR/bin/python3" -m uvicorn context_agent.api.http_handler:app \
     --host 0.0.0.0 --port "$PORT" \
     > "$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
+  NEW_PID=$!
+  echo "$NEW_PID" > "$PID_FILE"
 
   # 等待服务就绪
   info "等待服务启动..."
+  STARTED=false
   for i in $(seq 1 15); do
-    if curl -sf "http://localhost:$PORT/health" &>/dev/null; then
+    if curl -sf --max-time 2 "http://127.0.0.1:$PORT/health" &>/dev/null; then
       success "服务已就绪：http://localhost:$PORT"
       echo "  日志：$LOG_FILE"
       echo "  PID 文件：$PID_FILE"
+      STARTED=true
       break
     fi
-    [[ $i -eq 15 ]] && { warn "服务未在 15 秒内响应，请查看日志：$LOG_FILE"; }
+    if ! kill -0 "$NEW_PID" 2>/dev/null; then
+      diagnose_start_failure "$NEW_PID"
+    fi
     sleep 1
   done
+  if [[ "$STARTED" != true ]]; then
+    warn "服务未在 15 秒内通过健康检查。"
+    diagnose_start_failure "$NEW_PID"
+  fi
 fi
 
 # ── 完成 ──────────────────────────────────────────────────────────────────────

@@ -301,7 +301,18 @@ def _build_db_store(vector_store_config: dict[str, Any]) -> tuple[Any, Any]:
             "openJiuwen vector_store.dsn is required.",
             code=ErrorCode.CONFIGURATION_ERROR,
         )
-    engine = create_async_engine(_normalize_async_dsn(dsn), pool_pre_ping=True, echo=False)
+    normalized_dsn = _normalize_async_dsn(dsn)
+    try:
+        engine = create_async_engine(normalized_dsn, pool_pre_ping=True, echo=False)
+    except ModuleNotFoundError as exc:
+        if exc.name == "asyncpg" and normalized_dsn.startswith("postgresql+asyncpg://"):
+            raise ContextAgentError(
+                "PostgreSQL async driver 'asyncpg' is required for openJiuwen pgvector startup. "
+                "Reinstall ContextAgent with the openjiuwen extra.",
+                code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
+                details={"dsn": normalized_dsn, "missing_dependency": "asyncpg"},
+            ) from exc
+        raise
     return engine, DefaultDbStore(engine)
 
 
