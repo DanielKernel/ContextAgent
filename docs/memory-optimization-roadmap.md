@@ -1,10 +1,11 @@
 # ContextAgent 记忆能力全景与优化路线图
 
-本文档用于同时承载三类内容：
+本文档用于同时承载四类内容：
 
 1. `ContextAgent` 与 `openJiuwen` 当前记忆能力的**全景盘点**。
 2. `Awesome-Agent-Memory` 论文库对这些能力空间的**全量覆盖映射**。
-3. 基于不同优化目标生成的**可切换路线图**；当前第一条路线聚焦“改善多轮对话体验”。
+3. 多个开源记忆项目清单对这些能力空间的**工程实践映射**。
+4. 基于不同优化目标生成的**可切换路线图**；当前第一条路线聚焦“改善多轮对话体验”。
 
 ---
 
@@ -12,24 +13,25 @@
 
 本文档不再以“逐篇论文长文分析”为主，而改为**能力矩阵驱动**。
 
-这样做有三个原因：
+这样做有四个原因：
 
 1. `Awesome-Agent-Memory` 论文库已经很大，当前上游 README 中可解析的论文/资源条目已达到 **221** 条，继续按论文平均展开会迅速失控。
-2. `ContextAgent` 与 `openJiuwen` 的演进需要的是“能力缺口 -> 能力增强/新增 -> 优先级”的映射，而不是只积累论文摘要。
-3. 后续路线图会按不同目标切换优先级，因此需要一张稳定的能力全景表作为底座。
+2. 新增的三个 “awesome memory” 仓库收录了大量**开源项目、框架、MCP、存储后端、benchmark 与工程实践**，如果不单独建模，会把“方法论”和“工程借鉴对象”混在一起。
+3. `ContextAgent` 与 `openJiuwen` 的演进需要的是“能力缺口 -> 能力增强/新增 -> 优先级”的映射，而不是只积累论文摘要。
+4. 后续路线图会按不同目标切换优先级，因此需要一张稳定的能力全景表作为底座。
 
 **推荐阅读顺序**：
 
-1. 先看“语料全景与覆盖方式”，理解论文库如何被映射进能力空间。
+1. 先看“语料全景与覆盖方式”，理解论文库与开源项目库如何被映射进能力空间。
 2. 再看“ContextAgent / openJiuwen 当前能力清单”，了解当前真实基线。
-3. 然后看“能力全景与对比矩阵”，判断哪些属于增强型能力、哪些属于新增型能力。
+3. 然后看“能力全景与对比矩阵”，判断哪些属于增强型能力、哪些属于新增型能力，以及有哪些可直接借鉴的工程实践。
 4. 最后按当前优化目标查看对应路线；当前第一条路线聚焦“多轮对话体验”。
 
 ---
 
-## 2. 论文库全景与覆盖方式
+## 2. 语料全景与覆盖方式
 
-### 2.1 语料来源与当前规模
+### 2.1 论文语料来源与当前规模
 
 分析对象来自：
 
@@ -45,20 +47,62 @@
 
 > 注：仓库简介中仍写“218 key articles”，但当前 README 实际条目数已更高，说明论文库仍在持续更新。后续应以最新 README 解析结果为准。
 
-### 2.2 语料覆盖策略
+### 2.2 项目 / 实践语料来源与当前规模
 
-本路线图采用“**按能力项聚合**”作为主视图。
+除论文语料外，当前还纳入以下三个“项目 / 工程实践”仓库：
+
+- `https://github.com/XiaomingX/awesome-ai-memory`
+- `https://github.com/topoteretes/awesome-ai-memory`
+- `https://github.com/IAAR-Shanghai/Awesome-AI-Memory`
+
+这三个仓库的价值并不相同：
+
+| 来源 | 主要价值 | 对 roadmap 的补充作用 |
+| --- | --- | --- |
+| `XiaomingX/awesome-ai-memory` | 偏“项目选型与工程实践分层” | 帮助识别 integrated memory layer、MCP、本地记忆工具、基础设施、持续学习等**落地形态** |
+| `topoteretes/awesome-ai-memory` | 偏“AI memory 工具市场图谱” | 帮助建立 memory tool / framework / storage 的**生态对比视角** |
+| `IAAR-Shanghai/Awesome-AI-Memory` | 同时包含 papers、systems/open source、benchmarks/tasks | 帮助补齐 **系统实现、benchmark 与 control/evaluation** 视角 |
+
+从结构上看，这些仓库提供了三类关键增量：
+
+1. **直接可借鉴的记忆系统实现**：如 `Mem0`、`Zep`、`Graphiti`、`LangMem`、`Letta`、`cognee`、`GraphRAG`。
+2. **可作为外围集成或后端能力的生态组件**：如 `Neo4j`、`Chroma`、`Milvus`、`Qdrant`、`Weaviate`、`FalkorDB`。
+3. **不应直接等同于核心记忆能力、但对规划有启发的相邻实践**：如 benchmark/tasks、continual learning、online RLHF、distributed training、MCP skill ecosystem。
+
+### 2.3 双轴覆盖策略
+
+本路线图采用“**按能力项聚合**”作为主视图，并为每个能力项保留两条映射轴：
 
 也就是说：
 
-- **不是**为 221 篇论文逐条写对称篇幅的评述。
-- **而是**先将全部论文吸收到统一的能力空间中，再对每个能力簇判断：
+- **不是**为 221 篇论文和多个开源项目逐条写对称篇幅的评述。
+- **而是**先将全部论文与项目/实践吸收到统一的能力空间中，再对每个能力簇判断：
   - ContextAgent 是否已有基础
   - openJiuwen 是否已有 substrate / backend / retrieval 支撑
   - 这是“增强型能力”还是“新增型能力”
+  - 有哪些可直接借鉴的工程实践
   - 是否与当前优化目标强相关
 
-### 2.3 论文库 taxonomy 覆盖快照
+两条映射轴分别是：
+
+1. **论文轴**
+   - 提供机制、范式、评测、方法论依据。
+2. **项目 / 实践轴**
+   - 提供实现形态、架构取舍、生态依赖和集成参考。
+
+为了避免误判，本路线图还会对项目 / 实践增加三类标记：
+
+- **类型**：`memory tool` / `framework` / `MCP` / `storage` / `benchmark` / `infra` / `training`
+- **相关度**：
+  - `direct`：可以直接映射为 ContextAgent 记忆能力
+  - `adjacent`：与记忆能力强相关，但更像外围实现或配套模块
+  - `ecosystem`：更多是生态支撑，不应直接计入核心能力
+- **借鉴方式**：
+  - `直接增强`
+  - `参考实现`
+  - `生态配套`
+
+### 2.4 论文库 taxonomy 覆盖快照
 
 | 维度 | 标签 | 当前可解析条目数 | 对 ContextAgent 的意义 |
 | --- | --- | ---: | --- |
@@ -72,7 +116,7 @@
 | Subject | `agent` | 139 | agent 自身轨迹、策略、技能、反思与自我改进 |
 | Subject | `user` | 64 | 用户事实、偏好、历史与个性化持续性 |
 
-### 2.4 从 taxonomy 到“可落地能力簇”
+### 2.5 从语料库到“可落地能力簇”
 
 为了让语料库能服务工程规划，本文把所有论文进一步吸收进下列能力簇：
 
@@ -91,7 +135,22 @@
 13. utility governance / privacy / contradiction control
 14. evaluation / benchmark / policy learning
 
-这 14 个能力簇共同覆盖了上游语料库的主干能力空间；后续所有论文都应优先映射到这些能力簇之一或若干簇。
+这 14 个能力簇共同覆盖了当前论文语料和项目 / 实践语料的主干能力空间；后续所有新增条目都应优先映射到这些能力簇之一或若干簇。
+
+### 2.6 项目 / 实践语料的额外观察
+
+与纯论文语料相比，项目 / 实践语料还暴露了几个此前在文档里不够显式的问题：
+
+1. **记忆层不等于存储层**
+   - 像 `Mem0`、`Zep`、`Graphiti`、`LangMem`、`Letta`、`cognee` 这类项目提供的是更接近“memory layer / memory service”的能力。
+   - 像 `Neo4j`、`Qdrant`、`Chroma`、`Milvus`、`Weaviate` 则更偏 substrate / storage。
+   - 对 `ContextAgent` 来说，真正可直接借鉴的通常是前者；后者更适合作为 `openJiuwen` 后端生态的一部分。
+2. **MCP / 本地工具强调的是“外部工作记忆接口”**
+   - `Basic Memory`、`meMCP`、`memento-mcp`、`agentcortex-mcp` 一类项目，本质上强化的是可读写、可审计、可本地持久化的外部记忆接口。
+   - 这对 `ContextAgent` 的启发是：working memory / scratchpad 不必只存在于进程内或 Redis，还可以抽象成更可审计的 file/DB/tool backed working memory。
+3. **Benchmark / continual learning / online RLHF 更像规划边界提醒**
+   - 这些资源不意味着要把 `ContextAgent` 立刻改造成训练平台。
+   - 但它们提醒：长期对话体验的优化不能只做“召回更聪明”，还要补 continuity / redundancy / recovery / drift 的评测与治理闭环。
 
 ---
 
@@ -150,23 +209,24 @@
   - **增强型**：当前已有结构或相邻能力，可在原链路上升级。
   - **新增型**：当前基本缺失，需要新数据结构、新链路或新模块。
 - **实现主位**：优先由 `ContextAgent` 编排层、`openJiuwen` 能力边界，还是二者协同完成。
+- **项目 / 实践映射**：代表可直接借鉴或可作为生态支撑的开源项目。
 
-| 能力簇 | ContextAgent 当前状态 | openJiuwen 当前状态 | 论文覆盖与代表论文 | 能力类型 | 实现主位 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 外部长时记忆 substrate | 已有基础 | 已有基础 | 语料主流集中在 `external`（181）；代表：TraceMem、STaR、ShardMemo、Memoria | 增强型 | openJiuwen + adapter | 当前主链路已具备，不应绕过 openJiuwen |
-| Working memory / scratchpad | 已有 | 间接支撑 | `working`（69）；代表：TraceMem、STaR、Mem-T、ShardMemo | 增强型 | ContextAgent | 当前已有 session 级 working memory，但缺 turn / issue / topic 结构 |
-| Episodic consolidation / narrative memory | 仅有轻量基础 | 潜在可承载 | `episodic`（84）；代表：TraceMem、E-mem、MEMORA、MemWeaver | 新增型偏增强 | ContextAgent 主导，openJiuwen 承载 | 需要先在写入前形成 episode / summary / timeline |
-| Semantic abstraction / memory card | 有基础但较弱 | 有基础 | `semantic`（89）；代表：MEMORA、TraceMem、Memoria | 增强型 | ContextAgent + openJiuwen | 当前 semantic 更像标签分类，缺抽象层次与 memory card |
-| Procedural / skill memory | 基础很弱 | 可承载 | `procedural`（37）；代表：Darwinian Memory、ShardMemo、ReMe、SEAL | 新增型偏增强 | 二者协同 | 当前需要把 tool pattern / skill shard 从普通记忆中分离 |
-| User-centric personalization | 有基础但不连续 | 有基础 | `user`（64）；代表：TraceMem、Memoria、Mem-PAL、Me-Agent | 增强型 | ContextAgent 主导 | 关键在“偏好演化”“临时偏好 vs 稳定画像” |
-| Agent-centric experience memory | 基础较弱 | 可承载 | `agent`（139）；代表：Darwinian Memory、ShardMemo、AMA、BMAM | 新增型偏增强 | ContextAgent + openJiuwen | 当前 agent 经验记忆与用户记忆尚未真正分流 |
-| Retrieval routing / gating / shard probing | 有基础 | filters 已可透传 | 代表：STaR、ShardMemo、MEMORA、MemWeaver | 增强型 | ContextAgent 主导 | 当前已有 RRF / task-aware rerank，但未形成真正 scope-before-routing |
-| Cross-turn carryover / anti-redundancy | 基本缺失 | 无直接现成语义 | 代表：STaR、E-mem、TraceMem | 新增型 | ContextAgent | 对多轮体验最直接 |
-| Compression / compaction / abstraction balancing | 有基础但 flat | 无主导能力 | 代表：MEMORA、STaR、TraceMem、QwenLong-L1.5 | 增强型 | ContextAgent | 当前压缩仍以 flat items 为主，未显式保留问答结构 |
-| Multi-agent handoff / delegated evidence extraction | 有基础 | 无直接主导能力 | 代表：E-mem、BMAM、AMA、Topology Matters | 新增型偏增强 | ContextAgent | 当前 child scope 已有，但未进入 evidence extraction 阶段 |
-| Sensory / multimodal memory | 很弱 | 潜在可扩展 | `sensory`（25）；代表：MemOCR、VideoARM、WorldMM、MemVerse | 新增型 | 二者协同 | 目前不是当前主线，但需在 schema 上预留 |
-| Utility governance / privacy / contradiction control | 有零散基础 | 可存储 metadata | 代表：Darwinian Memory、Forgetful but Faithful、Topology Matters | 增强型 | ContextAgent 主导 | 当前有 hotness 和 health check，但缺长期 utility / privacy / contradiction policy |
-| Evaluation / benchmark / policy learning | 基本缺失 | 无直接主导能力 | 代表：survey、Mem-T、benchmark 类论文 | 新增型 | ContextAgent | 后续需要 continuity / redundancy / recovery 等目标导向评测 |
+| 能力簇 | ContextAgent 当前状态 | openJiuwen 当前状态 | 论文覆盖与代表论文 | 项目 / 实践映射 | 能力类型 | 实现主位 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 外部长时记忆 substrate | 已有基础 | 已有基础 | 语料主流集中在 `external`（181）；代表：TraceMem、STaR、ShardMemo、Memoria | `Mem0`、`Zep`、`Letta`、`cognee`、`Graphiti`、`LangMem`（direct） | 增强型 | openJiuwen + adapter | 当前主链路已具备，不应绕过 openJiuwen |
+| Working memory / scratchpad | 已有 | 间接支撑 | `working`（69）；代表：TraceMem、STaR、Mem-T、ShardMemo | `Basic Memory`、`meMCP`、`agentcortex-mcp`、`Khoj`（direct/adjacent） | 增强型 | ContextAgent | 当前已有 session 级 working memory，但缺 turn / issue / topic 结构 |
+| Episodic consolidation / narrative memory | 仅有轻量基础 | 潜在可承载 | `episodic`（84）；代表：TraceMem、E-mem、MEMORA、MemWeaver | `Memobase`、`Graphiti`、`NovelGenerator`、`SimpleMem`（direct） | 新增型偏增强 | ContextAgent 主导，openJiuwen 承载 | 需要先在写入前形成 episode / summary / timeline |
+| Semantic abstraction / memory card | 有基础但较弱 | 有基础 | `semantic`（89）；代表：MEMORA、TraceMem、Memoria | `LangMem`、`Mem0`、`MemAlign`、`Zep`（direct） | 增强型 | ContextAgent + openJiuwen | 当前 semantic 更像标签分类，缺抽象层次与 memory card |
+| Procedural / skill memory | 基础很弱 | 可承载 | `procedural`（37）；代表：Darwinian Memory、ShardMemo、ReMe、SEAL | `cognee`、`DSPy`、`Moltbot Skills`、`ToolMem` 类实践（adjacent） | 新增型偏增强 | 二者协同 | 当前需要把 tool pattern / skill shard 从普通记忆中分离 |
+| User-centric personalization | 有基础但不连续 | 有基础 | `user`（64）；代表：TraceMem、Memoria、Mem-PAL、Me-Agent | `Memobase`、`Mem0`、`Zep`、`MemWeaver`（direct） | 增强型 | ContextAgent 主导 | 关键在“偏好演化”“临时偏好 vs 稳定画像” |
+| Agent-centric experience memory | 基础较弱 | 可承载 | `agent`（139）；代表：Darwinian Memory、ShardMemo、AMA、BMAM | `SimpleMem`、`GraphRAG`、`cognee`、`HybridAGI`（adjacent） | 新增型偏增强 | ContextAgent + openJiuwen | 当前 agent 经验记忆与用户记忆尚未真正分流 |
+| Retrieval routing / gating / shard probing | 有基础 | filters 已可透传 | 代表：STaR、ShardMemo、MEMORA、MemWeaver | `GraphRAG`、`nano-graphrag`、`LlamaIndex`、`Haystack`（direct/adjacent） | 增强型 | ContextAgent 主导 | 当前已有 RRF / task-aware rerank，但未形成真正 scope-before-routing |
+| Cross-turn carryover / anti-redundancy | 基本缺失 | 无直接现成语义 | 代表：STaR、E-mem、TraceMem | `Letta`、`Mem0`、`Zep`、`Basic Memory`（direct） | 新增型 | ContextAgent | 对多轮体验最直接 |
+| Compression / compaction / abstraction balancing | 有基础但 flat | 无主导能力 | 代表：MEMORA、STaR、TraceMem、QwenLong-L1.5 | `Letta`、`Zep`、`LangMem`、`MemAlign`（direct/adjacent） | 增强型 | ContextAgent | 当前压缩仍以 flat items 为主，未显式保留问答结构 |
+| Multi-agent handoff / delegated evidence extraction | 有基础 | 无直接主导能力 | 代表：E-mem、BMAM、AMA、Topology Matters | `DeMAC`、`Agentic-Sync`、`Nexus Agents`、`LEGOMem`（adjacent） | 新增型偏增强 | ContextAgent | 当前 child scope 已有，但未进入 evidence extraction 阶段 |
+| Sensory / multimodal memory | 很弱 | 潜在可扩展 | `sensory`（25）；代表：MemOCR、VideoARM、WorldMM、MemVerse | `StoryMaker`、`IP-Adapter`、`ConsistI2V`、`Amphion`（adjacent） | 新增型 | 二者协同 | 目前不是当前主线，但需在 schema 上预留 |
+| Utility governance / privacy / contradiction control | 有零散基础 | 可存储 metadata | 代表：Darwinian Memory、Forgetful but Faithful、Topology Matters | `Basic Memory`、`memento-mcp`、privacy benchmark / governance practices（adjacent） | 增强型 | ContextAgent 主导 | 当前有 hotness 和 health check，但缺长期 utility / privacy / contradiction policy |
+| Evaluation / benchmark / policy learning | 基本缺失 | 无直接主导能力 | 代表：survey、Mem-T、benchmark 类论文 | `IAAR` benchmark/tasks、`HaluMem`、`Evo-Memory`、online RLHF / continual learning resources（adjacent/ecosystem） | 新增型 | ContextAgent | 后续需要 continuity / redundancy / recovery 等目标导向评测 |
 
 ### 4.1 哪些更适合视为“增强型能力”
 
@@ -212,12 +272,63 @@
 | Utility governance / privacy / contradiction control | 5 | 增强型 | 遗忘、隐私、冲突、污染与治理 |
 | Evaluation / benchmark / policy learning | 8 | 新增型 | 评测、指标、benchmark、学习式记忆策略 |
 
+### 4.4 开源项目 / 实践能力沙盘
+
+为了避免项目列表过于离散，这里把新增三份仓库中的代表项目按“对 ContextAgent 的借鉴关系”汇总如下：
+
+| 项目 / 实践簇 | 代表项目 | 相关度 | 对 ContextAgent 的借鉴价值 | 更适合落点 |
+| --- | --- | --- | --- | --- |
+| Integrated memory layer | `Mem0`、`Zep`、`Letta`、`LangMem`、`cognee`、`Memobase`、`Graphiti` | direct | 提供 memory layer / profile / summary / graph+vector / hierarchy 的成熟产品形态 | `ContextAgent` 编排层 + `openJiuwen` adapter 边界 |
+| Local-first / MCP memory tools | `Basic Memory`、`meMCP`、`memento-mcp`、`agentcortex-mcp`、`mcp-memory` | direct | 强化外部工作记忆、审计性、用户可见记忆编辑、本地隐私控制 | `WorkingMemoryManager`、外部 working memory adapter |
+| Retrieval / Graph memory patterns | `GraphRAG`、`nano-graphrag`、`LlamaIndex` Property Graph、`HybridAGI` | direct / adjacent | 提示应把 graph、topic、entity、episode 作为 first-class retrieval hints，而不只做向量召回 | `UnifiedSearchCoordinator`、`TieredMemoryRouter` |
+| Framework-level memory abstractions | `LangChain`、`LlamaIndex`、`Haystack`、`Rasa` | adjacent | 适合借鉴抽象接口设计，不适合作为 ContextAgent 核心能力本身 | API / adapter / integration layer |
+| Storage substrate ecosystem | `Neo4j`、`FalkorDB`、`NebulaGraph`、`Chroma`、`Milvus`、`Qdrant`、`Weaviate`、`Faiss` | ecosystem | 主要补齐后端选择，不应替代 ContextAgent 的 memory orchestration 设计 | `openJiuwen` config / backend |
+| Benchmark / evaluation resources | `IAAR` benchmarks/tasks、`HaluMem`、`Evo-Memory` | adjacent | 直接提示要补 continuity、hallucination、recovery、long-term consistency 评测 | `tests/`、docs、evaluation harness |
+| Continual learning / online alignment | `ContinualLM`、`CURLoRA`、`OpenRLHF`、`Online-RLHF` | ecosystem | 目前不应直接纳入主链路，但提醒长期个性化与漂移控制不能只靠检索层 | 远期研究 / policy learning |
+| Multi-agent coordination systems | `DeMAC`、`Agentic-Sync`、`Nexus Agents` | adjacent | 启发 shared memory、delegated state sync、memory leakage 控制 | `SubAgentContextManager`、handoff contracts |
+
+### 4.5 当前最值得借鉴的能力清单
+
+从“能较快改善多轮对话体验”的角度，当前最值得优先吸收的不是底层存储，而是以下几类实践：
+
+1. **Profile / memory card 演化机制**
+   - 参考：`Mem0`、`Memobase`、`LangMem`、`Zep`
+   - 借鉴方式：直接增强
+   - 适合目标：把 `SEMANTIC` 记忆从静态标签升级成可更新的 user/profile/topic memory card
+2. **本地可审计 working memory**
+   - 参考：`Basic Memory`、`meMCP`、`memento-mcp`
+   - 借鉴方式：直接增强
+   - 适合目标：让外部 scratchpad / 结构化 notes / unresolved items 成为一等对象，改善多轮连续性与人工可控性
+3. **Graph + topic aware retrieval**
+   - 参考：`Graphiti`、`GraphRAG`、`nano-graphrag`、`LlamaIndex`
+   - 借鉴方式：参考实现
+   - 适合目标：把当前 task-conditioned rerank 推进到 episode/topic/entity gating
+4. **层级压缩与冷热分层**
+   - 参考：`Letta`、`Zep`、`MemAlign`
+   - 借鉴方式：参考实现
+   - 适合目标：把 flat compression 升级成 turn → episode → profile / topic summary 的层级压缩链
+5. **多代理状态与证据同步**
+   - 参考：`DeMAC`、`Agentic-Sync`、`Nexus Agents`
+   - 借鉴方式：参考实现
+   - 适合目标：把当前 sub-agent 可见性隔离升级为“任务态连续 + 证据回传”
+
+### 4.6 当前不应误判为“核心记忆能力”的项目类别
+
+以下项目/实践很有参考价值，但不应被直接计入 ContextAgent 当前的核心记忆能力完成度：
+
+- 纯存储后端（如 `Qdrant`、`Milvus`、`Neo4j`、`Chroma`）
+- 通用框架（如 `LangChain`、`Haystack`）
+- 训练 / 对齐 / 持续学习框架（如 `OpenRLHF`、`ContinualLM`）
+- 多模态一致性工具（如 `StoryMaker`、`ConsistI2V`）
+
+这些项目更多回答“如何配套”和“如何长期演进”，而不是“当前 ContextAgent 已经具备哪种记忆能力”。
+
 ---
 
 
-## 5. 与当前代码最相关的高价值论文样本
+## 5. 与当前代码最相关的高价值论文 / 项目样本
 
-虽然主文档不再按论文逐条展开，但仍保留一组“高价值样本论文”，作为路线图的解释锚点。
+虽然主文档不再按论文或项目逐条展开，但仍保留一组“高价值样本”，作为路线图的解释锚点。
 
 ### 5.1 TraceMem
 
@@ -255,13 +366,31 @@
 - 对应能力簇：retrieval routing、procedure shard、agent-centric experience memory
 - 对 ContextAgent 的意义：与 `TieredMemoryRouter` / `UnifiedSearchCoordinator` 的边界高度贴合
 
+### 5.7 Mem0 / Zep / LangMem（项目簇）
+
+- 关键词：memory layer、profile extraction、summary update、cross-session memory
+- 对应能力簇：semantic abstraction、user-centric personalization、cross-turn continuity
+- 对 ContextAgent 的意义：说明“长期记忆能力”在工程上通常会被包装成更高层的 memory service，而不是直接暴露为原始向量库调用
+
+### 5.8 Graphiti / GraphRAG（项目簇）
+
+- 关键词：temporal graph、entity relation、graph-aware retrieval
+- 对应能力簇：episodic consolidation、retrieval routing、topic recovery
+- 对 ContextAgent 的意义：说明 topic / entity / timeline 结构应进入召回主链路，而不只是作为 metadata 附件
+
+### 5.9 Basic Memory / meMCP / memento-mcp（项目簇）
+
+- 关键词：local-first、auditable memory、external working memory、user-editable memory
+- 对应能力簇：working memory / scratchpad、utility governance、privacy control
+- 对 ContextAgent 的意义：对多轮体验而言，可审计的工作记忆与可控写入策略同样重要，不应只强调自动召回
+
 ---
 
 ## 6. 目标导向路线图框架
 
 本路线图以后不只维护一条“唯一优先级”，而改成：
 
-- **能力全景层**：稳定展示能力空间与论文覆盖
+- **能力全景层**：稳定展示能力空间与论文 / 项目实践覆盖
 - **目标导向路线层**：按不同目标重排优先级
 
 ### 6.1 后续可支持的目标路线
@@ -279,15 +408,27 @@
 5. **可靠性与治理**
    - 关注 contradiction suppression、memory poisoning、privacy、evaluation harness
 
+这些路线后续不仅可以从论文中抽取候选能力，也可以从项目 / 实践语料里抽取：
+
+- 可直接复用的设计模式
+- 值得增加的 adapter / metadata / contract
+- 应纳入评测体系的体验指标
+
 ### 6.2 为什么当前先做“多轮对话体验”
 
-因为当前最直接影响体感的问题都集中在这里：
+因为当前最直接影响体感的问题都集中在这里，而且项目 / 实践语料也给出了很一致的信号：
 
 - 每一轮仍偏 stateless retrieval
 - 长会话仍容易碎片化
 - 压缩仍不能表达对话结构
 - 偏好和阶段目标演化感弱
 - topic 切换时恢复上下文仍不稳定
+
+对应的工程侧佐证包括：
+
+- `Mem0` / `Zep` / `LangMem` 一类项目都在强调 profile / summary 持续更新
+- `Basic Memory` / `meMCP` 一类工具强调外部可审计 working memory
+- `Graphiti` / `GraphRAG` 一类项目强调 topic / entity / relation 级检索
 
 因此，当前第一条目标导向路线仍然应该聚焦多轮体验，而不是先做底层存储替换。
 
@@ -312,36 +453,42 @@
    - 能力类型：新增型
    - 对应能力簇：cross-turn carryover、retrieval routing
    - 代表论文：STaR、E-mem
+   - 代表项目 / 实践：`Letta`、`Mem0`、`Zep`
    - 目标模块：`OpenClaw assemble`、`ContextAPIRouter`、`ContextAggregator`、`task_conditioning.py`
 
 2. **Episode consolidation + narrative memory before LTM write**
    - 能力类型：新增型偏增强
    - 对应能力簇：episodic consolidation、user-centric personalization
    - 代表论文：TraceMem、MemWeaver、Memoria
+   - 代表项目 / 实践：`Memobase`、`Graphiti`、`NovelGenerator`
    - 目标模块：`MemoryOrchestrator`、`AsyncMemoryProcessor`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
 
 3. **Dialogue-aware compression for long_session / compaction**
    - 能力类型：增强型
    - 对应能力簇：compression / abstraction balancing
    - 代表论文：MEMORA、TraceMem、STaR
+   - 代表项目 / 实践：`Letta`、`Zep`、`MemAlign`
    - 目标模块：`CompressionStrategyRouter`、压缩策略注册表、`openclaw_handler.compact`
 
 4. **Scope-before-routing + episode/topic gating**
    - 能力类型：增强型
    - 对应能力簇：retrieval routing / gating
    - 代表论文：ShardMemo、STaR
+   - 代表项目 / 实践：`Graphiti`、`GraphRAG`、`nano-graphrag`
    - 目标模块：`UnifiedSearchCoordinator`、`TieredMemoryRouter`、`OpenJiuwenLTMAdapter`
 
 5. **User preference evolution / personalized memory card**
    - 能力类型：增强型
    - 对应能力簇：semantic abstraction、user-centric personalization
    - 代表论文：TraceMem、Memoria、Mem-PAL
+   - 代表项目 / 实践：`Mem0`、`LangMem`、`Memobase`
    - 目标模块：`MemoryOrchestrator`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
 
 6. **Task-conditioned retrieval 从 rerank 升级为 pruning + coverage-aware selection**
    - 能力类型：增强型
    - 对应能力簇：retrieval routing / anti-redundancy
    - 代表论文：STaR、MEMORA
+   - 代表项目 / 实践：`GraphRAG`、`LlamaIndex`、`Haystack`
    - 目标模块：`task_conditioning.py`、`ContextAggregator`、`UnifiedSearchCoordinator`
 
 ### 7.3 P1：建立在 P0 之上的增强能力
@@ -463,12 +610,13 @@ done
 | 能力类型 | 增强型 / 新增型 |
 | 代码路径 | 实际落点 |
 | 对应论文 | 代表论文 + 相关论文 |
+| 对应项目 / 实践 | 代表项目 + direct/adjacent/ecosystem 标记 |
 | 验证 | 单测、集成测试、性能回归、定性案例 |
 | 备注 | 风险、前置依赖、是否适合作为下一轮工作 |
 
 建议未来的推进节奏是：
 
-1. 先在“能力全景矩阵”里补足覆盖。
+1. 先在“能力全景矩阵”里补足论文和项目 / 实践覆盖。
 2. 再从某一条“目标导向路线”里选择 1 个能力簇推进到代码落地。
 3. 完成后把状态、验证和结果回写到同一文档，而不是新开平行 roadmap。
 
