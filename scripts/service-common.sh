@@ -127,6 +127,39 @@ load_contextagent_runtime() {
   HTTP_PORT="${HTTP_PORT:-8000}"
 }
 
+find_listening_pid() {
+  local port="$1"
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | awk 'NF { print; exit }'
+}
+
+describe_pid_command() {
+  local pid="$1"
+  ps -o command= -p "$pid" 2>/dev/null | sed 's/^[[:space:]]*//'
+}
+
+is_contextagent_pid() {
+  local pid="$1"
+  local command_line
+  command_line="$(describe_pid_command "$pid")"
+  [[ -n "$command_line" ]] || return 1
+  [[ "$command_line" == *"context_agent.api.http_handler:app"* || "$command_line" == *"context_agent.main:app"* ]]
+}
+
+find_contextagent_listener_pid() {
+  local port="$1"
+  local pid
+  command -v lsof >/dev/null 2>&1 || return 1
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if is_contextagent_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  done < <(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)
+  return 1
+}
+
 show_recent_log_tail() {
   local log_path="$1"
   local line_count="${2:-80}"
@@ -157,26 +190,40 @@ contextagent_is_running() {
   local pid
   pid="$(cat "$PID_FILE")"
   [[ -n "$pid" ]] || return 1
-  kill -0 "$pid" 2>/dev/null
+  kill -0 "$pid" 2>/dev/null || return 1
+  is_contextagent_pid "$pid"
 }
 
 stop_contextagent() {
-  if [[ ! -f "$PID_FILE" ]]; then
-    info "ContextAgent 未运行（缺少 PID 文件）"
-    return 0
+  load_contextagent_runtime
+
+  local pid=""
+  if [[ -f "$PID_FILE" ]]; then
+    pid="$(cat "$PID_FILE")"
   fi
 
-  local pid
-  pid="$(cat "$PID_FILE")"
+  if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$PID_FILE"
+    warn "ContextAgent PID 文件指向的进程已不存在，尝试按端口恢复"
+    pid=""
+  fi
+
+  if [[ -n "$pid" ]] && ! is_contextagent_pid "$pid"; then
+    warn "PID 文件指向的进程不是 ContextAgent，已清理 PID 文件：PID=$pid"
+    rm -f "$PID_FILE"
+    pid=""
+  fi
+
   if [[ -z "$pid" ]]; then
-    rm -f "$PID_FILE"
-    warn "ContextAgent PID 文件为空，已清理"
-    return 0
+    pid="$(find_contextagent_listener_pid "$HTTP_PORT" || true)"
+    if [[ -n "$pid" ]]; then
+      echo "$pid" > "$PID_FILE"
+      warn "根据端口 ${HTTP_PORT} 找到正在监听的 ContextAgent，已同步 PID：PID=$pid"
+    fi
   fi
 
-  if ! kill -0 "$pid" 2>/dev/null; then
-    rm -f "$PID_FILE"
-    warn "ContextAgent 进程已不存在，已清理 PID 文件"
+  if [[ -z "$pid" ]]; then
+    info "ContextAgent 未运行"
     return 0
   fi
 
@@ -205,6 +252,25 @@ start_contextagent() {
     pid="$(cat "$PID_FILE")"
     warn "ContextAgent 已在运行：PID=$pid"
     return 0
+  fi
+
+  if [[ -f "$PID_FILE" ]]; then
+    rm -f "$PID_FILE"
+  fi
+
+  local existing_pid
+  existing_pid="$(find_contextagent_listener_pid "$HTTP_PORT" || true)"
+  if [[ -n "$existing_pid" ]]; then
+    echo "$existing_pid" > "$PID_FILE"
+    warn "检测到端口 ${HTTP_PORT} 上已有 ContextAgent，已同步 PID 文件：PID=$existing_pid"
+    return 0
+  fi
+
+  local port_pid port_command
+  port_pid="$(find_listening_pid "$HTTP_PORT" || true)"
+  if [[ -n "$port_pid" ]]; then
+    port_command="$(describe_pid_command "$port_pid")"
+    die "端口 ${HTTP_PORT} 已被其他进程占用：PID=$port_pid CMD=${port_command:-unknown}"
   fi
 
   info "启动 ContextAgent（${HTTP_HOST}:${HTTP_PORT}）..."

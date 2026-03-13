@@ -126,6 +126,39 @@ diagnose_start_failure() {
   die "ContextAgent 启动失败。请根据上述日志排查依赖、配置或端口占用问题。"
 }
 
+find_listening_pid() {
+  local port="$1"
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | awk 'NF { print; exit }'
+}
+
+describe_pid_command() {
+  local pid="$1"
+  ps -o command= -p "$pid" 2>/dev/null | sed 's/^[[:space:]]*//'
+}
+
+is_contextagent_pid() {
+  local pid="$1"
+  local command_line
+  command_line="$(describe_pid_command "$pid")"
+  [[ -n "$command_line" ]] || return 1
+  [[ "$command_line" == *"context_agent.api.http_handler:app"* || "$command_line" == *"context_agent.main:app"* ]]
+}
+
+find_contextagent_listening_pid() {
+  local port="$1"
+  local pid
+  command -v lsof >/dev/null 2>&1 || return 1
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if is_contextagent_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  done < <(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)
+  return 1
+}
+
 echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║       ContextAgent 一键安装               ║"
@@ -214,12 +247,32 @@ if $START_SERVICE; then
   # 停止已有进程
   if [[ -f "$PID_FILE" ]]; then
     OLD_PID=$(cat "$PID_FILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
+    if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null && is_contextagent_pid "$OLD_PID"; then
       warn "发现已运行的进程 PID=$OLD_PID，正在停止..."
       kill "$OLD_PID" 2>/dev/null || true
       sleep 1
     fi
     rm -f "$PID_FILE"
+  fi
+
+  EXISTING_PID="$(find_contextagent_listening_pid "$PORT" || true)"
+  if [[ -n "$EXISTING_PID" ]]; then
+    warn "检测到端口 $PORT 上已有 ContextAgent，准备替换旧进程：PID=$EXISTING_PID"
+    kill "$EXISTING_PID" 2>/dev/null || true
+    for _ in $(seq 1 15); do
+      if ! kill -0 "$EXISTING_PID" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+    if kill -0 "$EXISTING_PID" 2>/dev/null; then
+      die "旧的 ContextAgent 未能在端口 $PORT 上正常退出：PID=$EXISTING_PID"
+    fi
+  fi
+
+  PORT_PID="$(find_listening_pid "$PORT" || true)"
+  if [[ -n "$PORT_PID" ]]; then
+    die "端口 $PORT 已被其他进程占用：PID=$PORT_PID CMD=$(describe_pid_command "$PORT_PID")"
   fi
 
   CA_CONTEXT_AGENT_CONFIG_PATH="$CONTEXT_AGENT_CONFIG_PATH" \

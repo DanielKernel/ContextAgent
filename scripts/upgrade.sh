@@ -190,6 +190,39 @@ diagnose_start_failure() {
   show_recent_log_tail "$LOG_FILE" 80
 }
 
+find_listening_pid() {
+  local port="$1"
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | awk 'NF { print; exit }'
+}
+
+describe_pid_command() {
+  local pid="$1"
+  ps -o command= -p "$pid" 2>/dev/null | sed 's/^[[:space:]]*//'
+}
+
+is_contextagent_pid() {
+  local pid="$1"
+  local command_line
+  command_line="$(describe_pid_command "$pid")"
+  [[ -n "$command_line" ]] || return 1
+  [[ "$command_line" == *"context_agent.api.http_handler:app"* || "$command_line" == *"context_agent.main:app"* ]]
+}
+
+find_contextagent_listening_pid() {
+  local port="$1"
+  local pid
+  command -v lsof >/dev/null 2>&1 || return 1
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if is_contextagent_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  done < <(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null)
+  return 1
+}
+
 find_pg_client_bin() {
   local bin_name="$1"
   if command -v "$bin_name" >/dev/null 2>&1; then
@@ -271,9 +304,17 @@ HTTP_PORT="${PORT_OVERRIDE:-${HTTP_PORT:-8080}}"
 SERVICE_WAS_RUNNING=false
 if [[ -f "$PID_FILE" ]]; then
   OLD_PID="$(cat "$PID_FILE")"
-  if kill -0 "$OLD_PID" 2>/dev/null; then
+  if [[ -n "$OLD_PID" ]] && kill -0 "$OLD_PID" 2>/dev/null && is_contextagent_pid "$OLD_PID"; then
     SERVICE_WAS_RUNNING=true
     info "检测到运行中的 ContextAgent 进程 PID=$OLD_PID"
+  fi
+fi
+if [[ "$SERVICE_WAS_RUNNING" != true ]]; then
+  OLD_PID="$(find_contextagent_listening_pid "$HTTP_PORT" || true)"
+  if [[ -n "$OLD_PID" ]]; then
+    SERVICE_WAS_RUNNING=true
+    echo "$OLD_PID" > "$PID_FILE"
+    info "根据端口 ${HTTP_PORT} 找到运行中的 ContextAgent 进程 PID=$OLD_PID"
   fi
 fi
 
@@ -412,6 +453,10 @@ fi
 
 if [[ "$SHOULD_START" == true ]]; then
   step "启动升级后的服务"
+  PORT_PID="$(find_listening_pid "$HTTP_PORT" || true)"
+  if [[ -n "$PORT_PID" ]]; then
+    die "端口 ${HTTP_PORT} 已被其他进程占用：PID=$PORT_PID CMD=$(describe_pid_command "$PORT_PID")"
+  fi
   CA_CONTEXT_AGENT_CONFIG_PATH="$CONTEXT_AGENT_CONFIG_PATH" \
   CA_OPENJIUWEN_CONFIG_PATH="$OPENJIUWEN_CONFIG_PATH" \
   "$VENV_DIR/bin/python3" -m uvicorn context_agent.api.http_handler:app \

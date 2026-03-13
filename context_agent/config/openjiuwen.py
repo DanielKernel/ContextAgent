@@ -542,6 +542,10 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
                 async_processor=memory_processor,
             )
             aggregator_kwargs["ltm"] = ltm_adapter
+            logger.info(
+                "openJiuwen long-term memory enabled",
+                config_path=str(resolved_openjiuwen_config),
+            )
     else:
         logger.info(
             "starting without openJiuwen long-term memory",
