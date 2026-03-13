@@ -10,6 +10,7 @@ from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
     _bootstrap_long_term_memory,
     _build_db_store,
+    _build_model_configs,
     _expand_env_placeholders,
     _instantiate_long_term_memory,
     _instantiate_vector_store,
@@ -325,6 +326,91 @@ def test_build_db_store_reports_missing_asyncpg(monkeypatch):
 
     assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
     assert exc.value.details["missing_dependency"] == "asyncpg"
+
+
+def test_build_model_configs_supplies_default_ssl_cert(monkeypatch, tmp_path):
+    cert_path = tmp_path / "ca.pem"
+    cert_path.write_text("dummy cert", encoding="utf-8")
+
+    class FakeModelRequestConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeModelClientConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_import(module_name, symbol_name):
+        if symbol_name == "ModelRequestConfig":
+            return FakeModelRequestConfig
+        if symbol_name == "ModelClientConfig":
+            return FakeModelClientConfig
+        raise AssertionError((module_name, symbol_name))
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+    monkeypatch.setattr(
+        "certifi.where",
+        lambda: str(cert_path),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.ssl.get_default_verify_paths",
+        lambda: type("Paths", (), {"cafile": str(cert_path)})(),
+    )
+
+    request_config, client_config = _build_model_configs(
+        {
+            "llm_config": {
+                "provider": "openai",
+                "model": "demo-model",
+                "api_key": "secret",
+                "base_url": "https://llm.example.com",
+            }
+        }
+    )
+
+    assert request_config.kwargs["model"] == "demo-model"
+    assert client_config.kwargs["verify_ssl"] is True
+    assert client_config.kwargs["ssl_cert"] == str(cert_path)
+
+
+def test_build_model_configs_preserves_explicit_ssl_settings(monkeypatch):
+    class FakeModelRequestConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeModelClientConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_import(module_name, symbol_name):
+        if symbol_name == "ModelRequestConfig":
+            return FakeModelRequestConfig
+        if symbol_name == "ModelClientConfig":
+            return FakeModelClientConfig
+        raise AssertionError((module_name, symbol_name))
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+
+    _, client_config = _build_model_configs(
+        {
+            "llm_config": {
+                "provider": "openai",
+                "model": "demo-model",
+                "api_key": "secret",
+                "base_url": "https://llm.example.com",
+                "verify_ssl": False,
+            }
+        }
+    )
+
+    assert client_config.kwargs["verify_ssl"] is False
+    assert client_config.kwargs["ssl_cert"] is None
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ import importlib
 import inspect
 import json
 import os
+import ssl
 import threading
 from pathlib import Path
 from typing import Any
@@ -189,6 +190,33 @@ def _normalize_provider_name(provider: str) -> str:
     return provider_map.get(normalized.lower(), normalized)
 
 
+def _resolve_ssl_cert_path(config: dict[str, Any]) -> tuple[bool, str | None]:
+    verify_ssl = bool(config.get("verify_ssl", True))
+    ssl_cert = config.get("ssl_cert")
+    if not verify_ssl or ssl_cert:
+        return verify_ssl, ssl_cert
+
+    try:
+        import certifi
+
+        certifi_path = certifi.where()
+    except Exception:  # pragma: no cover - depends on runtime environment
+        certifi_path = None
+
+    if certifi_path and Path(certifi_path).is_file():
+        return True, certifi_path
+
+    default_verify_paths = ssl.get_default_verify_paths()
+    default_cafile = default_verify_paths.cafile
+    if default_cafile and Path(default_cafile).is_file():
+        return True, default_cafile
+
+    logger.warning(
+        "No CA bundle found for openJiuwen model client; disabling SSL verification",
+    )
+    return False, None
+
+
 def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None]:
     llm_config = config.get("llm_config", {})
     if not isinstance(llm_config, dict) or not llm_config:
@@ -209,13 +237,15 @@ def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None
         top_p=llm_config.get("top_p", 0.7),
         max_tokens=llm_config.get("max_tokens"),
     )
+    verify_ssl, ssl_cert = _resolve_ssl_cert_path(llm_config)
     client_config = ModelClientConfig(
         client_provider=_normalize_provider_name(llm_config.get("provider", "openai")),
         api_key=llm_config.get("api_key", ""),
         api_base=llm_config.get("base_url", ""),
         timeout=llm_config.get("timeout", 30),
         max_retries=llm_config.get("max_retries", 2),
-        verify_ssl=llm_config.get("verify_ssl", True),
+        verify_ssl=verify_ssl,
+        ssl_cert=ssl_cert,
     )
     return request_config, client_config
 
