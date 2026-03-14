@@ -24,7 +24,7 @@ export interface ContextAgentConfig {
 const DEFAULTS: Omit<ContextAgentConfig, "baseUrl"> = {
   apiKey: "",
   scopeId: "openclaw",
-  timeoutMs: 5000,
+  timeoutMs: 30000,
   contextTokenBudget: 2048,
   retrievalMode: "fast",
   topK: 8,
