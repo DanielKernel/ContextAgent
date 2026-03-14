@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -46,6 +47,35 @@ def _known_attr(obj: object | None, name: str) -> object | None:
     return values.get(name)
 
 
+async def _close_resource(resource: object | None) -> None:
+    if resource is None:
+        return
+    for method_name in ("close", "aclose", "dispose"):
+        method = getattr(resource, method_name, None)
+        if not callable(method):
+            continue
+        result = method()
+        if inspect.isawaitable(result):
+            await result
+        return
+
+
+async def _close_router_resources(api_router: ContextAPIRouter | None) -> None:
+    aggregator = _known_attr(api_router, "_aggregator")
+    seen: set[int] = set()
+    for resource in (
+        _known_attr(api_router, "_llm_adapter"),
+        _known_attr(aggregator, "_ltm"),
+    ):
+        if resource is None:
+            continue
+        resource_id = id(resource)
+        if resource_id in seen:
+            continue
+        seen.add(resource_id)
+        await _close_resource(resource)
+
+
 def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -64,6 +94,7 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         yield
         if memory_processor is not None:
             await memory_processor.stop()
+        await _close_router_resources(api_router)
         logger.info("ContextAgent HTTP service shutting down")
 
     app = FastAPI(
@@ -156,13 +187,7 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
             warnings=warnings,
         )
 
-    @app.post(
-        "/context/write",
-        response_model=WriteResponse,
-        tags=["context"],
-        dependencies=[RequireAuth],
-    )
-    async def write_context(req: WriteRequest, request: Request) -> WriteResponse:
+    async def _write_context(req: WriteRequest, request: Request) -> WriteResponse:
         """Persist memory through working memory and openJiuwen-managed long-term memory."""
         router: ContextAPIRouter | None = request.app.state.api_router
         if router is None:
@@ -185,6 +210,25 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         )
         status = "accepted" if persisted else "ignored"
         return WriteResponse(item_id=item_id, status=status)
+
+    @app.post(
+        "/context/write",
+        response_model=WriteResponse,
+        tags=["context"],
+        dependencies=[RequireAuth],
+    )
+    async def write_context(req: WriteRequest, request: Request) -> WriteResponse:
+        return await _write_context(req, request)
+
+    @app.post(
+        "/v1/context/write",
+        response_model=WriteResponse,
+        tags=["context"],
+        dependencies=[RequireAuth],
+        include_in_schema=False,
+    )
+    async def write_context_v1(req: WriteRequest, request: Request) -> WriteResponse:
+        return await _write_context(req, request)
 
     @app.get(
         "/context/{scope_id}/versions",

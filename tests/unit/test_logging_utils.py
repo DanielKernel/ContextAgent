@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from context_agent.utils.logging import _should_use_colors, configure_logging
 
 
@@ -44,3 +46,18 @@ def test_configure_logging_quiets_http_clients():
 
     assert logging.getLogger("httpx").level == logging.WARNING
     assert logging.getLogger("httpcore").level == logging.WARNING
+
+
+def test_configure_logging_renders_plain_exceptions_without_ansi(capsys: pytest.CaptureFixture[str]):
+    configure_logging("INFO")
+
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError:
+        logging.getLogger("context-agent-test").exception("failure")
+
+    output = capsys.readouterr().out
+
+    assert "\x1b[" not in output
+    assert "RuntimeError: boom" in output
+    assert "locals" not in output

@@ -142,6 +142,21 @@ async def test_openjiuwen_adapter_health_check_logs_debug_on_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openjiuwen_adapter_health_check_prefers_cleanup_resource_probe() -> None:
+    class FakeResource:
+        async def health_check(self) -> bool:
+            return True
+
+    class FakeLTM:
+        async def search_user_mem(self, query, num, user_id, scope_id, threshold=0.0):
+            raise AssertionError("search probe should not be used when a cleanup resource can health check")
+
+    adapter = OpenJiuwenLTMAdapter(FakeLTM(), cleanup_resources=[FakeResource()])
+
+    assert await adapter.health_check() is True
+
+
+@pytest.mark.asyncio
 async def test_openjiuwen_adapter_add_messages_uses_memory_config_flags() -> None:
     calls = {}
 
@@ -268,3 +283,25 @@ async def test_openjiuwen_adapter_agentic_search_falls_back_to_standard_search()
 
     assert len(results) == 1
     assert results[0].content == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_openjiuwen_adapter_close_disposes_cleanup_resources() -> None:
+    calls: list[str] = []
+
+    class FakeResource:
+        async def dispose(self) -> None:
+            calls.append("resource.dispose")
+
+    class FakeLTM:
+        async def close(self) -> None:
+            calls.append("ltm.close")
+
+    adapter = OpenJiuwenLTMAdapter(
+        FakeLTM(),
+        cleanup_resources=[FakeResource()],
+    )
+
+    await adapter.close()
+
+    assert calls == ["resource.dispose", "ltm.close"]

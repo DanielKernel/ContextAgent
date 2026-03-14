@@ -276,6 +276,15 @@ def _resolve_ssl_cert_path(config: dict[str, Any]) -> tuple[bool, str | None]:
     return False, None
 
 
+def _export_safe_cert_dir(ssl_cert: str | None) -> None:
+    if not ssl_cert:
+        return
+    cert_path = Path(ssl_cert).expanduser().resolve()
+    os.environ["SAFE_CERT_DIR"] = str(cert_path.parent)
+    os.environ.setdefault("EMBEDDING_SSL_CERT", str(cert_path))
+    os.environ.setdefault("EMBEDDING_SSL_VERIFY", "true")
+
+
 def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None]:
     llm_config = config.get("llm_config", {})
     if not isinstance(llm_config, dict) or not llm_config:
@@ -297,6 +306,7 @@ def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None
         max_tokens=llm_config.get("max_tokens"),
     )
     verify_ssl, ssl_cert = _resolve_ssl_cert_path(llm_config)
+    _export_safe_cert_dir(ssl_cert)
     client_config = ModelClientConfig(
         client_provider=_normalize_provider_name(llm_config.get("provider", "openai")),
         api_key=llm_config.get("api_key", ""),
@@ -327,6 +337,12 @@ def _build_embedding_model(config: dict[str, Any]) -> Any | None:
     embedding_timeout = embedding_config.get("timeout", 60)
     embedding_retries = embedding_config.get("max_retries", 3)
     embedding_batch_size = embedding_config.get("batch_size", 8)
+    verify_ssl, ssl_cert = _resolve_ssl_cert_path(embedding_config)
+    _export_safe_cert_dir(ssl_cert)
+    if verify_ssl:
+        os.environ["EMBEDDING_SSL_VERIFY"] = "true"
+    else:
+        os.environ["EMBEDDING_SSL_VERIFY"] = "false"
     if provider in {"openai", "openrouter", "dashscope", "siliconflow"}:
         OpenAIEmbedding = _import_openjiuwen_symbol(
             "openjiuwen.core.retrieval.embedding.openai_embedding",
@@ -338,6 +354,7 @@ def _build_embedding_model(config: dict[str, Any]) -> Any | None:
             max_retries=embedding_retries,
             max_batch_size=embedding_batch_size,
             dimension=embedding_config.get("dimension"),
+            verify=ssl_cert if ssl_cert else verify_ssl,
         )
 
     APIEmbedding = _import_openjiuwen_symbol(
@@ -568,7 +585,13 @@ def _instantiate_vector_store(backend: str, vector_store_config: dict[str, Any])
     )
 
 
-async def _bootstrap_long_term_memory(ltm: Any, config: dict[str, Any]) -> Any:
+def _has_cleanup_method(resource: Any) -> bool:
+    return any(callable(getattr(resource, name, None)) for name in ("close", "aclose", "dispose"))
+
+
+async def _bootstrap_long_term_memory(
+    ltm: Any, config: dict[str, Any]
+) -> tuple[Any, tuple[Any, ...]]:
     vector_store_config = config.get("vector_store", {})
     if not isinstance(vector_store_config, dict):
         raise ContextAgentError(
@@ -578,12 +601,17 @@ async def _bootstrap_long_term_memory(ltm: Any, config: dict[str, Any]) -> Any:
 
     backend = str(vector_store_config.get("backend", "pgvector")).strip().lower()
     db_store = None
+    cleanup_resources: list[Any] = []
     if backend == "pgvector":
         db_engine, db_store = _build_db_store(vector_store_config)
         kv_store = _build_kv_store(db_engine)
+        if _has_cleanup_method(db_engine):
+            cleanup_resources.append(db_engine)
     else:
         kv_store = _build_in_memory_kv_store()
     vector_store = _instantiate_vector_store(backend, vector_store_config)
+    if _has_cleanup_method(vector_store):
+        cleanup_resources.append(vector_store)
     embedding_model = _build_embedding_model(config)
     await ltm.register_store(
         kv_store=kv_store,
@@ -596,7 +624,7 @@ async def _bootstrap_long_term_memory(ltm: Any, config: dict[str, Any]) -> Any:
         config.get("user_id", "context-agent"),
         _build_memory_scope_config(config),
     )
-    return ltm
+    return ltm, tuple(cleanup_resources)
 
 
 def resolve_openjiuwen_config_path(explicit_path: str | Path | None = None) -> Path | None:
@@ -640,8 +668,9 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
     )
     try:
         ltm = _instantiate_long_term_memory(LongTermMemory, config)
+        cleanup_resources: tuple[Any, ...] = ()
         if hasattr(ltm, "register_store") and hasattr(ltm, "set_scope_config"):
-            ltm = _run_async_in_sync(_bootstrap_long_term_memory(ltm, config))
+            ltm, cleanup_resources = _run_async_in_sync(_bootstrap_long_term_memory(ltm, config))
     except TypeError as exc:
         raise ContextAgentError(
             "Failed to initialize openJiuwen LongTermMemory with the installed "
@@ -660,7 +689,11 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
                 "vector_backend": vector_backend,
             },
         ) from exc
-    return OpenJiuwenLTMAdapter(ltm=ltm, memory_config=config.get("memory_config"))
+    return OpenJiuwenLTMAdapter(
+        ltm=ltm,
+        memory_config=config.get("memory_config"),
+        cleanup_resources=cleanup_resources,
+    )
 
 
 def build_default_api_router(settings: Settings | None = None) -> ContextAPIRouter:

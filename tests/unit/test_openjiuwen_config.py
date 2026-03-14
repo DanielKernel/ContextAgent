@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 
 import pytest
 
@@ -428,6 +429,9 @@ def test_build_model_configs_supplies_default_ssl_cert(monkeypatch, tmp_path):
         "context_agent.config.openjiuwen.ssl.get_default_verify_paths",
         lambda: type("Paths", (), {"cafile": str(cert_path)})(),
     )
+    monkeypatch.delenv("SAFE_CERT_DIR", raising=False)
+    monkeypatch.delenv("EMBEDDING_SSL_CERT", raising=False)
+    monkeypatch.delenv("EMBEDDING_SSL_VERIFY", raising=False)
 
     request_config, client_config = _build_model_configs(
         {
@@ -443,6 +447,9 @@ def test_build_model_configs_supplies_default_ssl_cert(monkeypatch, tmp_path):
     assert request_config.kwargs["model"] == "demo-model"
     assert client_config.kwargs["verify_ssl"] is True
     assert client_config.kwargs["ssl_cert"] == str(cert_path)
+    assert os.environ["SAFE_CERT_DIR"] == str(cert_path.parent)
+    assert os.environ["EMBEDDING_SSL_CERT"] == str(cert_path)
+    assert os.environ["EMBEDDING_SSL_VERIFY"] == "true"
 
 
 def test_build_model_configs_preserves_explicit_ssl_settings(monkeypatch):
@@ -480,6 +487,60 @@ def test_build_model_configs_preserves_explicit_ssl_settings(monkeypatch):
 
     assert client_config.kwargs["verify_ssl"] is False
     assert client_config.kwargs["ssl_cert"] is None
+
+
+def test_build_embedding_model_exports_ssl_env(monkeypatch, tmp_path):
+    cert_path = tmp_path / "embed-ca.pem"
+    cert_path.write_text("dummy cert", encoding="utf-8")
+
+    class FakeEmbeddingConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeOpenAIEmbedding:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_import(module_name, symbol_name):
+        if symbol_name == "EmbeddingConfig":
+            return FakeEmbeddingConfig
+        if symbol_name == "OpenAIEmbedding":
+            return FakeOpenAIEmbedding
+        raise AssertionError((module_name, symbol_name))
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+    monkeypatch.setattr(
+        "certifi.where",
+        lambda: str(cert_path),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen.ssl.get_default_verify_paths",
+        lambda: type("Paths", (), {"cafile": str(cert_path)})(),
+    )
+    monkeypatch.delenv("SAFE_CERT_DIR", raising=False)
+    monkeypatch.delenv("EMBEDDING_SSL_CERT", raising=False)
+    monkeypatch.delenv("EMBEDDING_SSL_VERIFY", raising=False)
+
+    embedding = _build_embedding_model(
+        {
+            "embedding_config": {
+                "provider": "openai",
+                "model": "text-embedding-v4",
+                "base_url": "https://example.com/v1",
+                "api_key": "secret",
+                "dimension": 1024,
+            }
+        }
+    )
+
+    assert isinstance(embedding, FakeOpenAIEmbedding)
+    assert embedding.kwargs["verify"] == str(cert_path)
+    assert os.environ["SAFE_CERT_DIR"] == str(cert_path.parent)
+    assert os.environ["EMBEDDING_SSL_CERT"] == str(cert_path)
+    assert os.environ["EMBEDDING_SSL_VERIFY"] == "true"
 
 
 def test_build_embedding_model_uses_openai_client_for_openai_provider(monkeypatch):
@@ -564,6 +625,67 @@ async def test_bootstrap_long_term_memory_does_not_require_dsn_for_non_pgvector(
         )
 
     assert exc.value.code == ErrorCode.OPENJIUWEN_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_long_term_memory_returns_cleanup_resources_for_pgvector(monkeypatch):
+    class FakeLongTermMemory:
+        async def register_store(self, **kwargs):
+            self.kwargs = kwargs
+
+        def set_config(self, config):
+            self.config = config
+
+        async def set_scope_config(self, user_id, config):
+            self.user_id = user_id
+            self.scope_config = config
+
+    class FakeEngine:
+        async def dispose(self):
+            return None
+
+    class FakeVectorStore:
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._build_db_store",
+        lambda _cfg: (FakeEngine(), object()),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._build_kv_store",
+        lambda _engine: object(),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._instantiate_vector_store",
+        lambda _backend, _cfg: FakeVectorStore(),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._build_embedding_model",
+        lambda _cfg: None,
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._build_memory_engine_config",
+        lambda _cfg: object(),
+    )
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._build_memory_scope_config",
+        lambda _cfg: object(),
+    )
+
+    ltm, cleanup_resources = await _bootstrap_long_term_memory(
+        FakeLongTermMemory(),
+        {
+            "user_id": "context-agent",
+            "vector_store": {
+                "backend": "pgvector",
+                "dsn": "postgresql://localhost/context_agent",
+            },
+        },
+    )
+
+    assert isinstance(ltm, FakeLongTermMemory)
+    assert len(cleanup_resources) == 2
 
 
 def test_instantiate_vector_store_reports_missing_pgvector_dependency(monkeypatch):

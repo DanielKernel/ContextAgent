@@ -332,3 +332,24 @@ class OpenJiuwenPGVectorStoreBridge(BaseVectorStore):
         if row is None or row[0] is None:
             return {}
         return dict(row[0])
+
+    async def close(self) -> None:
+        seen: set[int] = set()
+        for store in self._stores.values():
+            engine = getattr(store, "_engine", None)
+            if engine is None:
+                continue
+            engine_id = id(engine)
+            if engine_id in seen:
+                continue
+            seen.add(engine_id)
+            await engine.dispose()
+        await self._engine.dispose()
+
+    async def health_check(self) -> bool:
+        try:
+            async with self._engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            return True
+        except Exception:
+            return False

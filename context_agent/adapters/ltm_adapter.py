@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any
 
 from context_agent.models.context import ContextItem, MemoryType
@@ -44,6 +45,17 @@ async def _call_ltm_method(  # noqa: ANN401
             key: value for key, value in kwargs.items() if key in signature.parameters
         }
     return await method(*args, **filtered_kwargs)
+
+
+async def _close_resource(resource: Any) -> None:
+    for method_name in ("close", "aclose", "dispose"):
+        method = getattr(resource, method_name, None)
+        if not callable(method):
+            continue
+        result = method()
+        if inspect.isawaitable(result):
+            await result
+        return
 
 
 class LongTermMemoryPort(ABC):
@@ -107,10 +119,12 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         self,
         ltm: Any,
         memory_config: dict[str, Any] | None = None,
+        cleanup_resources: Sequence[Any] | None = None,
     ) -> None:
         # ltm: openjiuwen LongTermMemory instance (injected at startup)
         self._ltm = ltm
         self._memory_config = memory_config or {}
+        self._cleanup_resources = tuple(cleanup_resources or ())
 
     async def search(
         self,
@@ -262,6 +276,15 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
             raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def health_check(self) -> bool:
+        for resource in self._cleanup_resources:
+            health_check = getattr(resource, "health_check", None)
+            if callable(health_check):
+                try:
+                    result = health_check()
+                    return bool(await result) if inspect.isawaitable(result) else bool(result)
+                except Exception as exc:
+                    logger.debug("ltm resource health check failed", error=str(exc))
+                    return False
         try:
             await _call_ltm_method(
                 self._ltm.search_user_mem,
@@ -316,3 +339,14 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                     error=str(exc),
                 )
         return await self.search(scope_id, query, top_k)
+
+    async def close(self) -> None:
+        seen: set[int] = set()
+        for resource in (*self._cleanup_resources, self._ltm):
+            if resource is None:
+                continue
+            resource_id = id(resource)
+            if resource_id in seen:
+                continue
+            seen.add(resource_id)
+            await _close_resource(resource)

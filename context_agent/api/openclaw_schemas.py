@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Shared message model ───────────────────────────────────────────────────────
@@ -31,8 +31,10 @@ class BootstrapRequest(BaseModel):
     Allows ContextAgent to warm its caches / restore prior state.
     """
 
-    scope_id: str = Field(..., description="Logical scope (e.g. channel or user ID)")
-    session_id: str = Field(..., description="OpenClaw session identifier")
+    model_config = ConfigDict(populate_by_name=True)
+
+    scope_id: str = Field(..., description="Logical scope (e.g. channel or user ID)", alias="scopeId")
+    session_id: str = Field(..., description="OpenClaw session identifier", alias="sessionId")
     messages: list[AgentMessage] = Field(
         default_factory=list, description="Full conversation history from the session file"
     )
@@ -52,8 +54,10 @@ class IngestRequest(BaseModel):
     Corresponds to ``ingest()`` / ``ingestBatch()`` in the ContextEngine interface.
     """
 
-    scope_id: str
-    session_id: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    scope_id: str = Field(alias="scopeId")
+    session_id: str = Field(alias="sessionId")
     messages: list[AgentMessage] = Field(..., min_length=1)
 
 
@@ -73,8 +77,10 @@ class AssembleRequest(BaseModel):
     ``systemPromptAddition`` string which OpenClaw prepends to the system prompt.
     """
 
-    scope_id: str
-    session_id: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    scope_id: str = Field(alias="scopeId")
+    session_id: str = Field(alias="sessionId")
     messages: list[AgentMessage] = Field(
         ..., description="Current message list (post-sanitize, pre-LLM)"
     )
@@ -82,14 +88,15 @@ class AssembleRequest(BaseModel):
         default="",
         description="Optional explicit query; derived from last user message when empty.",
     )
-    token_budget: int = Field(default=2048, gt=0, le=32768)
-    top_k: int = Field(default=8, gt=0, le=50)
+    token_budget: int = Field(default=2048, gt=0, le=32768, alias="tokenBudget")
+    top_k: int = Field(default=8, gt=0, le=50, alias="topK")
     mode: Literal["fast", "quality"] = "fast"
     min_score: float = Field(
         default=0.01,
         ge=0.0,
         le=1.0,
         description="Minimum relevance score threshold. Context items below this are filtered.",
+        alias="minScore",
     )
 
 
@@ -124,13 +131,17 @@ class CompactRequest(BaseModel):
     and forwards them here.
     """
 
-    scope_id: str
-    session_id: str
+    model_config = ConfigDict(populate_by_name=True)
+
+    scope_id: str = Field(alias="scopeId")
+    session_id: str = Field(alias="sessionId")
     messages: list[AgentMessage]
-    token_limit: int = Field(default=8192, gt=0)
+    token_limit: int = Field(default=8192, gt=0, alias="tokenLimit")
     force: bool = False
-    compaction_target: Literal["budget", "threshold"] | None = None
-    custom_instructions: str | None = None
+    compaction_target: Literal["budget", "threshold"] | None = Field(
+        default=None, alias="compactionTarget"
+    )
+    custom_instructions: str | None = Field(default=None, alias="customInstructions")
 
 
 class CompactResponse(BaseModel):
@@ -152,11 +163,13 @@ class AfterTurnRequest(BaseModel):
     working-memory updates.
     """
 
-    scope_id: str
-    session_id: str
-    assistant_message: AgentMessage
+    model_config = ConfigDict(populate_by_name=True)
+
+    scope_id: str = Field(alias="scopeId")
+    session_id: str = Field(alias="sessionId")
+    assistant_message: AgentMessage = Field(alias="assistantMessage")
     # IDs returned by the preceding assemble() call — used to update active_count
-    used_context_item_ids: list[str] = Field(default_factory=list)
+    used_context_item_ids: list[str] = Field(default_factory=list, alias="usedContextItemIds")
 
 
 class AfterTurnResponse(BaseModel):

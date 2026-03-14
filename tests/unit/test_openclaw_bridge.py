@@ -250,6 +250,21 @@ class TestAssembleEndpoint:
         )
         assert resp.status_code == 200
 
+    def test_assemble_accepts_camel_case_fields(self):
+        client = _make_client(with_router=True)
+        resp = client.post(
+            "/v1/openclaw/assemble",
+            json={
+                "scopeId": "s1",
+                "sessionId": "sid1",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tokenBudget": 1024,
+                "topK": 5,
+                "minScore": 0.2,
+            },
+        )
+        assert resp.status_code == 200
+
     def test_assemble_no_router_graceful(self):
         client = _make_client(with_router=False)
         resp = client.post(
@@ -314,6 +329,33 @@ class TestCompactEndpoint:
                 "messages": _make_messages(5),
                 "token_limit": 1024,
                 "legacy_params": {"tokenLimit": 1024, "model": "claude-3-haiku"},
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_compact_accepts_camel_case_fields(self):
+        client = _make_client(with_router=True)
+        resp = client.post(
+            "/v1/openclaw/compact",
+            json={
+                "scopeId": "s1",
+                "sessionId": "sid1",
+                "messages": _make_messages(5),
+                "tokenLimit": 1024,
+                "compactionTarget": "budget",
+                "customInstructions": "keep latest facts",
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_bootstrap_accepts_camel_case_scope_fields(self):
+        client = _make_client(with_router=True)
+        resp = client.post(
+            "/v1/openclaw/bootstrap",
+            json={
+                "scopeId": "s1",
+                "sessionId": "sid1",
+                "messages": _make_messages(2),
             },
         )
         assert resp.status_code == 200
