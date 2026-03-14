@@ -32,7 +32,7 @@ find_python() {
   return 1
 }
 
-PYTHON3="${PYTHON3:-$(find_python)}" || die "未找到 Python 3.11+"
+PYTHON3="$VENV_DIR/bin/python3"
 
 read_env_or_default() {
   local key="$1"

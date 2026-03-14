@@ -422,14 +422,12 @@ def _build_memory_scope_config(config: dict[str, Any]) -> Any:
         "EmbeddingConfig",
     )
     request_config, client_config = _build_model_configs(config)
-    embedding_config = config.get("embedding_config", {})
+    # Avoid re-creating embedding model config for scopes if it matches global.
+    # This prevents openJiuwen from instantiating new EmbeddingModel instances per scope,
+    # which can lead to asyncio loop attachment issues if done lazily.
+    # By passing None, we encourage openJiuwen to use the globally registered embedding model.
     scope_embedding_config = None
-    if isinstance(embedding_config, dict) and embedding_config:
-        scope_embedding_config = EmbeddingConfig(
-            model_name=embedding_config.get("model", ""),
-            base_url=embedding_config.get("base_url", ""),
-            api_key=embedding_config.get("api_key", ""),
-        )
+    
     return MemoryScopeConfig(
         model_cfg=request_config,
         model_client_cfg=client_config,
