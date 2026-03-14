@@ -15,6 +15,10 @@ from typing import Any, Coroutine
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
+from dotenv import load_dotenv
+
+# Load .env file explicitly to support ${VAR} expansion
+load_dotenv(override=False)
 
 from context_agent.adapters.llm_adapter import HttpLLMAdapter
 from context_agent.adapters.openjiuwen_db_kv_store import OpenJiuwenDbBasedKVStoreCompat
@@ -333,6 +337,14 @@ def _build_embedding_model(config: dict[str, Any]) -> Any | None:
     embedding_config = config.get("embedding_config", {})
     if not isinstance(embedding_config, dict) or not embedding_config:
         logger.warning("No embedding_config found in openJiuwen config")
+        return None
+
+    model_name = embedding_config.get("model", "")
+    if not model_name or _is_unresolved_placeholder(model_name):
+        logger.warning(
+            "Embedding model name is empty or unresolved placeholder",
+            model_name=model_name,
+        )
         return None
 
     # Check loop status to catch "attached to different loop" issues early
