@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,7 +39,7 @@ logger = get_logger(__name__)
 _START_TIME = time.monotonic()
 
 
-def _known_attr(obj: object | None, name: str) -> object | None:
+def _known_attr(obj: object | None, name: str) -> Any:  # noqa: ANN401
     if obj is None:
         return None
     values = getattr(obj, "__dict__", None)
@@ -87,14 +88,37 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        from context_agent.config.openjiuwen import build_default_api_router_async
+
         logger.info("ContextAgent HTTP service starting", version="0.1.0")
-        memory_processor = _known_attr(api_router, "_memory_processor")
+
+        if app.state.api_router is None:
+            app.state.api_router = await build_default_api_router_async()
+            app.state.runtime_health_checker = _known_attr(
+                app.state.api_router, "_runtime_health_checker"
+            ) or RuntimeDependencyHealthChecker(
+                settings=settings,
+                llm_adapter=_known_attr(app.state.api_router, "_llm_adapter"),
+            )
+
+        router = app.state.api_router
+        # Cast to Any to allow calling start/stop methods dynamically
+        memory_processor: Any = _known_attr(router, "_memory_processor")
+
         if memory_processor is not None:
-            await memory_processor.start()
+            start_method = getattr(memory_processor, "start", None)
+            if inspect.iscoroutinefunction(start_method):
+                await start_method()
+            elif callable(start_method):
+                start_method()
         yield
         if memory_processor is not None:
-            await memory_processor.stop()
-        await _close_router_resources(api_router)
+            stop_method = getattr(memory_processor, "stop", None)
+            if inspect.iscoroutinefunction(stop_method):
+                await stop_method()
+            elif callable(stop_method):
+                stop_method()
+        await _close_router_resources(router)
         logger.info("ContextAgent HTTP service shutting down")
 
     app = FastAPI(
@@ -239,7 +263,7 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     async def list_versions(
         scope_id: str,
         session_id: str = "",
-        request: Request = None,
+        request: Request | None = None,
     ) -> VersionListResponse:
         router: ContextAPIRouter | None = request.app.state.api_router if request else None
         if router is None:
@@ -347,11 +371,4 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
 # means in-memory / stub implementations are used).  For production you can
 # replace this with `create_app(api_router=your_router)` in an entrypoint.
 # ---------------------------------------------------------------------------
-def _build_default_app() -> FastAPI:
-    from context_agent.config.openjiuwen import build_default_api_router
-
-    default_router = build_default_api_router()
-    return create_app(api_router=default_router)
-
-
-app = _build_default_app()
+app = create_app()

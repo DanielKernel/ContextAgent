@@ -11,7 +11,7 @@ import re
 import ssl
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Coroutine
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
@@ -643,7 +643,7 @@ def resolve_openjiuwen_config_path(explicit_path: str | Path | None = None) -> P
     return None
 
 
-def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapter:
+async def build_openjiuwen_ltm_adapter_async(config_path: str | Path) -> OpenJiuwenLTMAdapter:
     """Build an OpenJiuwenLTMAdapter from an openJiuwen config file."""
     config = _expand_env_placeholders(load_openjiuwen_config(config_path))
     try:
@@ -670,7 +670,7 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
         ltm = _instantiate_long_term_memory(LongTermMemory, config)
         cleanup_resources: tuple[Any, ...] = ()
         if hasattr(ltm, "register_store") and hasattr(ltm, "set_scope_config"):
-            ltm, cleanup_resources = _run_async_in_sync(_bootstrap_long_term_memory(ltm, config))
+            ltm, cleanup_resources = await _bootstrap_long_term_memory(ltm, config)
     except TypeError as exc:
         raise ContextAgentError(
             "Failed to initialize openJiuwen LongTermMemory with the installed "
@@ -696,7 +696,13 @@ def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapte
     )
 
 
-def build_default_api_router(settings: Settings | None = None) -> ContextAPIRouter:
+def build_openjiuwen_ltm_adapter(config_path: str | Path) -> OpenJiuwenLTMAdapter:
+    """Build an OpenJiuwenLTMAdapter from an openJiuwen config file."""
+    from typing import cast
+    return cast(OpenJiuwenLTMAdapter, _run_async_in_sync(build_openjiuwen_ltm_adapter_async(config_path)))
+
+
+async def build_default_api_router_async(settings: Settings | None = None) -> ContextAPIRouter:
     """Build the default API router, wiring openJiuwen LTM when configured."""
     runtime_settings = settings or get_settings()
     aggregator_kwargs: dict[str, Any] = {}
@@ -716,7 +722,7 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
             load_openjiuwen_config(resolved_openjiuwen_config)
         )
         try:
-            ltm_adapter = build_openjiuwen_ltm_adapter(
+            ltm_adapter = await build_openjiuwen_ltm_adapter_async(
                 resolved_openjiuwen_config
             )
         except ContextAgentError as exc:
@@ -760,6 +766,12 @@ def build_default_api_router(settings: Settings | None = None) -> ContextAPIRout
         aggregator=ContextAggregator(**aggregator_kwargs),
         **router_kwargs,
     )
+
+
+def build_default_api_router(settings: Settings | None = None) -> ContextAPIRouter:
+    """Build the default API router, wiring openJiuwen LTM when configured."""
+    from typing import cast
+    return cast(ContextAPIRouter, _run_async_in_sync(build_default_api_router_async(settings)))
 
 
 def build_default_llm_adapter(
