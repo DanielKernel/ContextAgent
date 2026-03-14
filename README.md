@@ -384,3 +384,4 @@ python3 examples/business_agent.py     # 完整 CRM 客服 Agent 集成
 - [docs/requirements-analysis.md](docs/requirements-analysis.md) — 需求分析说明书（16 UC）
 - [docs/architecture-design.md](docs/architecture-design.md) — 架构设计文档（4+1 视图）
 - [docs/agent-integration-guide.md](docs/agent-integration-guide.md) — **业务 Agent 接入指导**
+- [docs/debugging-guide.md](docs/debugging-guide.md) — **调试与排障指南**

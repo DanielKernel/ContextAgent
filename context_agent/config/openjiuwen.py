@@ -405,10 +405,25 @@ def _build_memory_engine_config(config: dict[str, Any]) -> Any:
         "openjiuwen.core.memory.config.config",
         "MemoryEngineConfig",
     )
+    EmbeddingConfig = _import_openjiuwen_symbol(
+        "openjiuwen.core.retrieval.common.config",
+        "EmbeddingConfig",
+    )
     request_config, client_config = _build_model_configs(config)
+    
+    embedding_config = config.get("embedding_config", {})
+    scope_embedding_config = None
+    if isinstance(embedding_config, dict) and embedding_config:
+        scope_embedding_config = EmbeddingConfig(
+            model_name=embedding_config.get("model", ""),
+            base_url=embedding_config.get("base_url", ""),
+            api_key=embedding_config.get("api_key", ""),
+        )
+
     return MemoryEngineConfig(
         default_model_cfg=request_config,
         default_model_client_cfg=client_config,
+        default_embedding_cfg=scope_embedding_config,
     )
 
 

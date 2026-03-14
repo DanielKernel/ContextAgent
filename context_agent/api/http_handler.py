@@ -262,10 +262,10 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
     )
     async def list_versions(
         scope_id: str,
+        request: Request,
         session_id: str = "",
-        request: Request = None,  # type: ignore[assignment]
     ) -> VersionListResponse:
-        router: ContextAPIRouter | None = request.app.state.api_router if request else None
+        router: ContextAPIRouter | None = request.app.state.api_router
         if router is None:
             return VersionListResponse(versions=[])
         records = await router._vm.list_versions(scope_id, session_id)
