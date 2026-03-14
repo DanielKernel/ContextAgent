@@ -54,7 +54,15 @@ def _expand_env_placeholders(value: Any) -> Any:
 def _run_async_in_sync(awaitable: Any) -> Any:
     """Run an awaitable from synchronous startup code."""
     try:
-        asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
+        # If we have a running loop, we can't block it with run_until_complete.
+        # But spawning a thread creates a NEW loop, which breaks async resources.
+        # We must warn about this dangerous pattern.
+        logger.warning(
+            "Running async code in sync context via thread! This creates a temporary loop "
+            "and WILL break resources like HTTP clients or DB pools.",
+            stack_info=True,
+        )
     except RuntimeError:
         return asyncio.run(awaitable)
 
@@ -63,6 +71,8 @@ def _run_async_in_sync(awaitable: Any) -> Any:
 
     def _runner() -> None:
         try:
+            # Create a new event loop for this thread to ensure isolation
+            # but warn that resources created here are tied to this short-lived loop.
             result["value"] = asyncio.run(awaitable)
         except BaseException as exc:  # pragma: no cover - defensive thread bridge
             error["value"] = exc
@@ -322,7 +332,16 @@ def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None
 def _build_embedding_model(config: dict[str, Any]) -> Any | None:
     embedding_config = config.get("embedding_config", {})
     if not isinstance(embedding_config, dict) or not embedding_config:
+        logger.warning("No embedding_config found in openJiuwen config")
         return None
+
+    # Check loop status to catch "attached to different loop" issues early
+    try:
+        loop = asyncio.get_running_loop()
+        if loop.is_closed():
+            logger.error("Building embedding model in a CLOSED loop!", stack_info=True)
+    except RuntimeError:
+        pass
 
     EmbeddingConfig = _import_openjiuwen_symbol(
         "openjiuwen.core.foundation.store.base_embedding",
