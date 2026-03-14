@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import time
 from collections.abc import Awaitable
 from dataclasses import asdict, dataclass, field
@@ -15,6 +16,7 @@ from context_agent.config.settings import Settings, get_settings
 from context_agent.utils.logging import get_logger
 
 logger = get_logger(__name__)
+_PLACEHOLDER_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 class AsyncHealthClient(Protocol):
@@ -35,7 +37,32 @@ def _known_attr(obj: object | None, name: str) -> object | None:
 
 
 def _is_unresolved_placeholder(value: object) -> bool:
-    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
+    return isinstance(value, str) and bool(_PLACEHOLDER_PATTERN.search(value))
+
+
+def _extract_placeholders(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str):
+        return ()
+    return tuple(dict.fromkeys(_PLACEHOLDER_PATTERN.findall(value)))
+
+
+def _collect_placeholder_refs(
+    value: object,
+    *,
+    path: str,
+) -> list[tuple[str, str]]:
+    refs: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            refs.extend(_collect_placeholder_refs(item, path=f"{path}.{key}"))
+        return refs
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            refs.extend(_collect_placeholder_refs(item, path=f"{path}[{index}]"))
+        return refs
+    for var_name in _extract_placeholders(value):
+        refs.append((path, var_name))
+    return refs
 
 
 @dataclass
@@ -73,7 +100,8 @@ class RuntimeDependencyHealthChecker:
         self._openjiuwen_config_path = (
             Path(openjiuwen_config_path).expanduser().resolve() if openjiuwen_config_path else None
         )
-        self._openjiuwen_config = openjiuwen_config
+        self._raw_openjiuwen_config = openjiuwen_config
+        self._openjiuwen_config: dict[str, Any] | None = None
         self._openjiuwen_config_error: str | None = None
         self._llm_adapter = llm_adapter
         self._component_timeout_s = component_timeout_s
@@ -83,6 +111,10 @@ class RuntimeDependencyHealthChecker:
             "contextagent": self._run_component(
                 "contextagent",
                 self._check_contextagent(api_router),
+            ),
+            "environment": self._run_component(
+                "environment",
+                self._check_environment(),
             ),
             "pgvector": self._run_component(
                 "pgvector",
@@ -177,6 +209,74 @@ class RuntimeDependencyHealthChecker:
             metadata=metadata,
         )
 
+    async def _check_environment(self) -> ComponentHealthReport:
+        settings_refs = _collect_placeholder_refs(
+            self._settings.model_dump(mode="python"),
+            path="context_agent",
+        )
+        openjiuwen_raw = self._get_raw_openjiuwen_config()
+        if openjiuwen_raw is None and self._openjiuwen_config_error is not None:
+            return ComponentHealthReport(
+                name="environment",
+                status="degraded",
+                detail=f"failed to load openJiuwen config: {self._openjiuwen_config_error}",
+                configured=True,
+            )
+
+        openjiuwen_refs = (
+            _collect_placeholder_refs(openjiuwen_raw, path="openjiuwen")
+            if openjiuwen_raw is not None
+            else []
+        )
+        unresolved_refs = settings_refs
+        if openjiuwen_raw is not None:
+            unresolved_refs = [
+                *settings_refs,
+                *_collect_placeholder_refs(self._get_openjiuwen_config(), path="openjiuwen"),
+            ]
+
+        total_refs = [*settings_refs, *openjiuwen_refs]
+        if not total_refs:
+            return ComponentHealthReport(
+                name="environment",
+                status="ok",
+                detail=(
+                    "no placeholder-based environment variables detected in active configuration"
+                ),
+                configured=False,
+            )
+
+        unresolved_vars = sorted({var_name for _, var_name in unresolved_refs})
+        all_vars = sorted({var_name for _, var_name in total_refs})
+        if unresolved_vars:
+            unresolved_locations = ", ".join(
+                f"{path} -> {var_name}" for path, var_name in unresolved_refs
+            )
+            return ComponentHealthReport(
+                name="environment",
+                status="degraded",
+                detail=(
+                    "unresolved environment variables in the running service process: "
+                    + ", ".join(unresolved_vars)
+                ),
+                configured=True,
+                metadata={
+                    "missing_vars": ",".join(unresolved_vars),
+                    "locations": unresolved_locations,
+                },
+            )
+
+        return ComponentHealthReport(
+            name="environment",
+            status="ok",
+            detail=(
+                f"resolved {len(all_vars)} placeholder-based environment variables in the "
+                "running service process"
+            ),
+            configured=True,
+            metadata={"vars": ",".join(all_vars)},
+        )
+
     async def _check_pgvector(self, api_router: object | None) -> ComponentHealthReport:
         config = self._get_openjiuwen_config()
         if config is None:
@@ -247,7 +347,10 @@ class RuntimeDependencyHealthChecker:
             return ComponentHealthReport(
                 name="llm",
                 status="skipped",
-                detail="default LLM config still contains unresolved environment placeholders in the running service process",
+                detail=(
+                    "default LLM config still contains unresolved environment placeholders "
+                    "in the running service process"
+                ),
                 configured=False,
             )
 
@@ -302,13 +405,16 @@ class RuntimeDependencyHealthChecker:
                 detail="embedding model is not configured",
                 configured=False,
             )
-        if _is_unresolved_placeholder(embedding_config.get("base_url")) or _is_unresolved_placeholder(
-            embedding_config.get("model")
-        ):
+        if _is_unresolved_placeholder(
+            embedding_config.get("base_url")
+        ) or _is_unresolved_placeholder(embedding_config.get("model")):
             return ComponentHealthReport(
                 name="embedding",
                 status="skipped",
-                detail="embedding config still contains unresolved environment placeholders in the running service process",
+                detail=(
+                    "embedding config still contains unresolved environment placeholders "
+                    "in the running service process"
+                ),
                 configured=False,
             )
 
@@ -350,8 +456,30 @@ class RuntimeDependencyHealthChecker:
         if self._openjiuwen_config_error is not None:
             return None
 
+        from context_agent.config.openjiuwen import _expand_env_placeholders
+
+        try:
+            raw_config = self._get_raw_openjiuwen_config()
+            if raw_config is None:
+                return None
+            self._openjiuwen_config = _expand_env_placeholders(raw_config)
+        except Exception as exc:
+            self._openjiuwen_config_error = str(exc)
+            logger.warning(
+                "failed to load openJiuwen config for health checks",
+                path=str(self._openjiuwen_config_path),
+                error=str(exc),
+            )
+            return None
+        return self._openjiuwen_config
+
+    def _get_raw_openjiuwen_config(self) -> dict[str, Any] | None:
+        if self._raw_openjiuwen_config is not None:
+            return self._raw_openjiuwen_config
+        if self._openjiuwen_config_error is not None:
+            return None
+
         from context_agent.config.openjiuwen import (
-            _expand_env_placeholders,
             load_openjiuwen_config,
             resolve_openjiuwen_config_path,
         )
@@ -364,9 +492,7 @@ class RuntimeDependencyHealthChecker:
 
         self._openjiuwen_config_path = Path(resolved_path).expanduser().resolve()
         try:
-            self._openjiuwen_config = _expand_env_placeholders(
-                load_openjiuwen_config(self._openjiuwen_config_path)
-            )
+            self._raw_openjiuwen_config = load_openjiuwen_config(self._openjiuwen_config_path)
         except Exception as exc:
             self._openjiuwen_config_error = str(exc)
             logger.warning(
@@ -375,7 +501,7 @@ class RuntimeDependencyHealthChecker:
                 error=str(exc),
             )
             return None
-        return self._openjiuwen_config
+        return self._raw_openjiuwen_config
 
     def _resolve_llm_adapter(
         self, api_router: object | None

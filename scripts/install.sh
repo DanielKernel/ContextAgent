@@ -14,9 +14,10 @@
 #                   openJiuwen 配置文件路径（默认 ./.local/config/openjiuwen.yaml）
 #    --help         显示帮助
 # =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/env-bootstrap.sh"
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_DIR/.venv"
 PORT=8000
@@ -312,6 +313,7 @@ echo "║  ✅  安装成功！                            ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 echo "  手动启动服务："
+echo "    # 脚本/Makefile 会自动加载 ~/.bashrc 与 .env 中的变量"
 echo "    export CA_CONTEXT_AGENT_CONFIG_PATH=$CONTEXT_AGENT_CONFIG_PATH"
 echo "    export CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
 echo "    make run-dev"

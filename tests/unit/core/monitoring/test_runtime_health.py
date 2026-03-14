@@ -67,6 +67,7 @@ async def test_runtime_health_checker_reports_all_components_healthy(
 
     assert report.status == "ok"
     assert report.components["contextagent"].status == "ok"
+    assert report.components["environment"].status == "ok"
     assert report.components["pgvector"].status == "ok"
     assert report.components["llm"].status == "ok"
     assert report.components["embedding"].status == "ok"
@@ -143,7 +144,9 @@ async def test_runtime_health_checker_skips_unresolved_embedding_placeholders() 
 
 
 @pytest.mark.asyncio
-async def test_runtime_health_checker_uses_openjiuwen_llm_config_when_settings_are_defaults() -> None:
+async def test_runtime_health_checker_uses_openjiuwen_llm_config_when_settings_are_defaults() -> (
+    None
+):
     checker = RuntimeDependencyHealthChecker(
         settings=Settings(),
         openjiuwen_config={
@@ -168,3 +171,84 @@ async def test_runtime_health_checker_uses_openjiuwen_llm_config_when_settings_a
     )
 
     assert report.components["llm"].metadata["model"] == "actual-model"
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_checker_flags_unresolved_environment_placeholders(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CTXLLM_MODEL", raising=False)
+    monkeypatch.delenv("CTXLLM_BASE_URL", raising=False)
+    monkeypatch.delenv("CTXLLM_API_KEY", raising=False)
+    monkeypatch.delenv("EMBED_MODEL", raising=False)
+    monkeypatch.delenv("EMBED_BASE_URL", raising=False)
+
+    checker = RuntimeDependencyHealthChecker(
+        settings=Settings(),
+        openjiuwen_config={
+            "llm_config": {
+                "model": "${CTXLLM_MODEL}",
+                "base_url": "${CTXLLM_BASE_URL}",
+                "api_key": "${CTXLLM_API_KEY}",
+            },
+            "embedding_config": {
+                "model": "${EMBED_MODEL}",
+                "base_url": "${EMBED_BASE_URL}",
+            },
+            "vector_store": {"backend": "pgvector"},
+        },
+    )
+
+    report = await checker.check(
+        SimpleNamespace(
+            _aggregator=SimpleNamespace(_ltm=_HealthyLTM()),
+            _working_memory=object(),
+            _memory_processor=None,
+        )
+    )
+
+    assert report.status == "degraded"
+    assert report.components["environment"].status == "degraded"
+    assert report.components["environment"].metadata["missing_vars"] == (
+        "CTXLLM_API_KEY,CTXLLM_BASE_URL,CTXLLM_MODEL,EMBED_BASE_URL,EMBED_MODEL"
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_health_checker_accepts_resolved_environment_placeholders(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CTXLLM_MODEL", "demo-llm")
+    monkeypatch.setenv("CTXLLM_BASE_URL", "https://llm.example.com")
+    monkeypatch.setenv("CTXLLM_API_KEY", "secret")
+    monkeypatch.setenv("EMBED_MODEL", "demo-embedding")
+    monkeypatch.setenv("EMBED_BASE_URL", "https://embed.example.com")
+
+    checker = RuntimeDependencyHealthChecker(
+        settings=Settings(),
+        openjiuwen_config={
+            "llm_config": {
+                "model": "${CTXLLM_MODEL}",
+                "base_url": "${CTXLLM_BASE_URL}",
+                "api_key": "${CTXLLM_API_KEY}",
+            },
+            "embedding_config": {
+                "model": "${EMBED_MODEL}",
+                "base_url": "${EMBED_BASE_URL}",
+            },
+            "vector_store": {"backend": "pgvector"},
+        },
+    )
+
+    report = await checker.check(
+        SimpleNamespace(
+            _aggregator=SimpleNamespace(_ltm=_HealthyLTM()),
+            _working_memory=object(),
+            _memory_processor=None,
+        )
+    )
+
+    assert report.components["environment"].status == "ok"
+    assert report.components["environment"].metadata["vars"] == (
+        "CTXLLM_API_KEY,CTXLLM_BASE_URL,CTXLLM_MODEL,EMBED_BASE_URL,EMBED_MODEL"
+    )

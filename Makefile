@@ -1,5 +1,8 @@
 .PHONY: lint type-check test test-int test-perf build clean clean-venv install venv venv-install venv-freeze venv-test venv-run run-dev format quickstart upgrade setup-openclaw uninstall-openclaw health-check
 
+SHELL := /usr/bin/env bash
+export BASH_ENV := $(CURDIR)/scripts/env-bootstrap.sh
+
 PYTHON3 := python3
 VENV_DIR := .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python3

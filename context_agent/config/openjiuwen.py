@@ -7,6 +7,7 @@ import importlib
 import inspect
 import json
 import os
+import re
 import ssl
 import threading
 from pathlib import Path
@@ -36,6 +37,7 @@ logger = get_logger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OPENJIUWEN_CONFIG_PATH = DEFAULT_RUNTIME_CONFIG_DIR / "openjiuwen.yaml"
 REPOSITORY_OPENJIUWEN_TEMPLATE_PATH = PROJECT_ROOT / "config" / "openjiuwen.yaml"
+_PLACEHOLDER_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 
 def _expand_env_placeholders(value: Any) -> Any:
@@ -192,7 +194,7 @@ def _normalize_provider_name(provider: str) -> str:
 
 
 def _is_unresolved_placeholder(value: object) -> bool:
-    return isinstance(value, str) and value.startswith("${") and value.endswith("}")
+    return isinstance(value, str) and bool(_PLACEHOLDER_PATTERN.search(value))
 
 
 def _settings_llm_uses_builtin_defaults(settings: Settings) -> bool:
