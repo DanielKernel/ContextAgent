@@ -37,11 +37,11 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
-        structlog.processors.CallSiteParameterAdder(
+        structlog.processors.CallsiteParameterAdder(
             {
-                structlog.processors.CallSiteParameter.FILENAME,
-                structlog.processors.CallSiteParameter.LINENO,
-                structlog.processors.CallSiteParameter.FUNC_NAME,
+                structlog.processors.CallsiteParameter.FILENAME,
+                structlog.processors.CallsiteParameter.LINENO,
+                structlog.processors.CallsiteParameter.FUNC_NAME,
             }
         ),
         structlog.processors.StackInfoRenderer(),
