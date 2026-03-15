@@ -37,6 +37,7 @@ class MemoryTaskType(str, Enum):
 class MemoryTask:
     scope_id: str
     task_type: MemoryTaskType
+    session_id: str = ""
     user_id: str = ""
     messages: list[dict[str, Any]] = field(default_factory=list)
     memory_id: str = ""
@@ -159,6 +160,7 @@ class AsyncMemoryProcessor:
 
                 await self._ltm.add_messages(
                     scope_id=task.scope_id,
+                    session_id=task.session_id,
                     messages=task.messages,
                     user_id=task.user_id,
                 )

@@ -96,8 +96,9 @@ class MemoryOrchestrator:
             await self._async_processor.enqueue(
                 MemoryTask(
                     scope_id=scope_id,
-                    user_id=user_id or scope_id,
                     task_type=MemoryTaskType.ADD,
+                    session_id=session_id,
+                    user_id=user_id or scope_id,
                     messages=ltm_messages,
                 )
             )

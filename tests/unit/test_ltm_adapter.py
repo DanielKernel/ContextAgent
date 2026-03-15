@@ -182,12 +182,13 @@ async def test_openjiuwen_adapter_add_messages_uses_memory_config_flags() -> Non
     await adapter.add_messages(
         "scope-1",
         [{"role": "user", "content": "hello"}],
+        session_id="session-9",
         user_id="user-1",
     )
 
     assert calls["user_id"] == "user-1"
     assert calls["scope_id"] == "scope-1"
-    assert calls["session_id"] == "scope-1"
+    assert calls["session_id"] == "session-9"
     assert calls["agent_config"].enable_long_term_mem is False
     assert calls["agent_config"].enable_user_profile is False
     assert calls["agent_config"].enable_semantic_memory is True
@@ -211,12 +212,13 @@ async def test_openjiuwen_adapter_add_messages_without_agent_config_support() ->
     await adapter.add_messages(
         "scope-1",
         [{"role": "assistant", "content": "hello"}],
+        session_id="session-9",
     )
 
     assert calls["messages"] == [{"role": "assistant", "content": "hello"}]
     assert calls["user_id"] == "scope-1"
     assert calls["scope_id"] == "scope-1"
-    assert calls["session_id"] == "scope-1"
+    assert calls["session_id"] == "session-9"
 
 
 @pytest.mark.asyncio

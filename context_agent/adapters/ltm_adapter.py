@@ -90,6 +90,7 @@ class LongTermMemoryPort(ABC):
         self,
         scope_id: str,
         messages: list[dict[str, Any]],
+        session_id: str = "",
         user_id: str = "",
     ) -> None:
         """Write messages into long-term memory (fire-and-forget safe)."""
@@ -223,6 +224,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         self,
         scope_id: str,
         messages: list[dict[str, Any]],
+        session_id: str = "",
         user_id: str = "",
     ) -> None:
         await self._ensure_scope_config(scope_id)
@@ -264,7 +266,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 agent_config=agent_config,
                 user_id=user_id or scope_id,
                 scope_id=scope_id,
-                session_id=scope_id,
+                session_id=session_id or scope_id,
             )
         except Exception as exc:
             logger.warning("ltm.add_messages failed", scope_id=scope_id, error=str(exc))

@@ -92,6 +92,7 @@ async def test_memory_orchestrator_persists_preferences_to_ltm_queue():
     assert items[0].category == MemoryCategory.PREFERENCES
     processor.enqueue.assert_awaited_once()
     task = processor.enqueue.await_args.args[0]
+    assert task.session_id == "session-1"
     assert task.messages[0]["metadata"]["memory_type"] == MemoryType.PROCEDURAL.value
 
 
@@ -117,3 +118,5 @@ async def test_memory_orchestrator_honors_explicit_memory_type_requests():
 
     assert items[0].memory_type == MemoryType.SEMANTIC
     assert items[0].category == MemoryCategory.PROFILE
+    task = processor.enqueue.await_args.args[0]
+    assert task.session_id == "session-1"

@@ -51,6 +51,7 @@ class TestAsyncMemoryProcessor:
             MemoryTask(
                 scope_id="scope-1",
                 task_type=MemoryTaskType.ADD,
+                session_id="session-1",
                 messages=[{"role": "user", "content": "raw preference"}],
                 user_id="user-1",
             )
@@ -61,6 +62,7 @@ class TestAsyncMemoryProcessor:
         checker.check.assert_awaited_once()
         ltm.add_messages.assert_awaited_once_with(
             scope_id="scope-1",
+            session_id="session-1",
             messages=[{"role": "user", "content": "normalized preference"}],
             user_id="user-1",
         )
@@ -83,13 +85,19 @@ class TestAsyncMemoryProcessor:
             MemoryTask(
                 scope_id="scope-1",
                 task_type=MemoryTaskType.ADD,
+                session_id="session-1",
                 messages=[{"role": "user", "content": "keep this"}],
             )
         )
         await processor._queue.join()
         await processor.stop()
 
-        ltm.add_messages.assert_awaited_once()
+        ltm.add_messages.assert_awaited_once_with(
+            scope_id="scope-1",
+            session_id="session-1",
+            messages=[{"role": "user", "content": "keep this"}],
+            user_id="",
+        )
 
     async def test_update_and_delete_tasks_call_ltm_methods(self):
         ltm = AsyncMock()
