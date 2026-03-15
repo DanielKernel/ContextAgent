@@ -37,7 +37,7 @@ budgets:
     hot_tier_timeout_ms: 20.0
     warm_tier_timeout_ms: 100.0
     cold_tier_timeout_ms: 300.0
-    aggregation_timeout_ms: 200.0
+    aggregation_timeout_ms: 2000.0
   tokens:
     default_token_budget: 4096
     tool_result_token_limit: 1024
@@ -50,7 +50,7 @@ memory:
 
 retrieval:
   default_top_k: 10
-  timeout_ms: 250.0
+  timeout_ms: 1000.0
   rerank_top_k: 5
   hybrid:
     vector_weight: 0.6

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -279,6 +279,13 @@ class Settings(BaseSettings):
     auth_enabled: bool = False
     auth_secret_key: str = ""
     api_keys: list[str] = Field(default_factory=list)
+
+    @field_validator("aggregation_timeout_ms", mode="after")
+    @classmethod
+    def _enforce_min_aggregation_timeout(cls, v: float) -> float:
+        if v < 1000.0:
+            return 2000.0
+        return v
 
     @classmethod
     def settings_customise_sources(

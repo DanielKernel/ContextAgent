@@ -35,13 +35,21 @@ def merge_missing_values(
     defaults: dict[str, Any],
     *,
     path_prefix: str = "",
+    force_update_keys: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Fill only missing keys from defaults, preserving existing user values."""
     merged = dict(existing)
     inserted_paths: list[str] = []
+    force_update_keys = force_update_keys or set()
 
     for key, default_value in defaults.items():
         dotted_path = f"{path_prefix}.{key}" if path_prefix else key
+        
+        if dotted_path in force_update_keys:
+            merged[key] = default_value
+            inserted_paths.append(f"{dotted_path} (updated)")
+            continue
+
         if key not in merged:
             merged[key] = default_value
             inserted_paths.append(dotted_path)
@@ -53,6 +61,7 @@ def merge_missing_values(
                 existing_value,
                 default_value,
                 path_prefix=dotted_path,
+                force_update_keys=force_update_keys,
             )
             merged[key] = nested_merged
             inserted_paths.extend(nested_paths)
@@ -65,6 +74,7 @@ def merge_preserving_existing(
     defaults: dict[str, Any],
     *,
     replace_top_level_keys: set[str] | None = None,
+    force_update_keys: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Merge configs while preserving existing values except selected top-level keys.
 
@@ -73,6 +83,7 @@ def merge_preserving_existing(
     section such as ``vector_store``.
     """
     replaced = replace_top_level_keys or set()
+    force_update_keys = force_update_keys or set()
     merged = dict(defaults)
     inserted_paths: list[str] = []
 
@@ -80,6 +91,10 @@ def merge_preserving_existing(
         if key in replaced:
             if key not in existing:
                 inserted_paths.append(key)
+            continue
+
+        if key in force_update_keys:
+            inserted_paths.append(f"{key} (updated)")
             continue
 
         if key not in existing:
@@ -92,6 +107,7 @@ def merge_preserving_existing(
                 existing_value,
                 default_value,
                 path_prefix=key,
+                force_update_keys=force_update_keys,
             )
             merged[key] = nested_merged
             inserted_paths.extend(nested_paths)
@@ -111,6 +127,7 @@ def migrate_config_file(
     template_path: str | Path,
     *,
     replace_top_level_keys: set[str] | None = None,
+    force_update_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Merge missing values from a template config into a target config file."""
     target = Path(target_path).expanduser().resolve()
@@ -123,6 +140,7 @@ def migrate_config_file(
             existing,
             defaults,
             replace_top_level_keys=replace_top_level_keys,
+            force_update_keys=force_update_keys,
         )
         target.write_text(
             yaml.safe_dump(merged, sort_keys=False, allow_unicode=False),
@@ -149,6 +167,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Top-level key to regenerate from the template instead of preserving the existing value",
     )
+    parser.add_argument(
+        "--force-key",
+        action="append",
+        dest="force_update_keys",
+        default=[],
+        help="Dotted key path to force update from template (e.g. budgets.latency.timeout_ms)",
+    )
     return parser
 
 
@@ -159,6 +184,7 @@ def main() -> None:
         args.target,
         args.template,
         replace_top_level_keys=set(args.replace_top_level_keys),
+        force_update_keys=set(args.force_update_keys),
     )
     print(json.dumps(result, ensure_ascii=True))
 

@@ -10,6 +10,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+USER_ID="openclaw"
 BACKEND="pgvector"
 CONFIG_PATH="$PROJECT_DIR/.local/config/openjiuwen.yaml"
 
@@ -24,10 +25,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend) BACKEND="$2"; shift 2 ;;
     --config) CONFIG_PATH="$2"; shift 2 ;;
+    --user-id) USER_ID="$2"; shift 2 ;;
     --help|-h)
-      echo "用法: bash scripts/setup-vector-backend.sh [--backend BACKEND] [--config PATH]"
+      echo "用法: bash scripts/setup-vector-backend.sh [--backend BACKEND] [--config PATH] [--user-id ID]"
       echo "  --backend BACKEND   向量库后端（默认 pgvector，可选 qdrant / milvus）"
       echo "  --config PATH       openJiuwen 运行态配置文件输出路径（默认 .local/config/openjiuwen.yaml）"
+      echo "  --user-id ID        Scope/User ID (默认 openclaw)"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac
@@ -113,13 +116,28 @@ merge_generated_config() {
   "$PYTHON3" "$PROJECT_DIR/context_agent/config/migration.py" \
     --target "$CONFIG_PATH" \
     --template "$template_path" \
-    --replace-top-level-key vector_store >/dev/null
+    --replace-top-level-key vector_store \
+    --force-key user_id \
+    --force-key llm_config.timeout >/dev/null
 }
 
 copy_example_config() {
   local example_file="$PROJECT_DIR/examples/configs/$BACKEND/openjiuwen.yaml"
   [[ -f "$example_file" ]] || die "未找到示例配置：$example_file"
-  merge_generated_config "$example_file"
+  
+  # Create temp template with updated USER_ID
+  local temp_template="$(mktemp "${TMPDIR:-/tmp}/context-agent-template.XXXXXX.yaml")"
+  cp "$example_file" "$temp_template"
+  
+  # Replace user_id in temp template
+  if [[ "$(uname)" == "Darwin" ]]; then
+      sed -i '' "s/^user_id:.*/user_id: $USER_ID/" "$temp_template"
+  else
+      sed -i "s/^user_id:.*/user_id: $USER_ID/" "$temp_template"
+  fi
+
+  merge_generated_config "$temp_template"
+  rm -f "$temp_template"
   success "已生成 openJiuwen 配置：$CONFIG_PATH"
 }
 
@@ -240,8 +258,44 @@ SQL
 
   local generated_config
   generated_config="$(mktemp "${TMPDIR:-/tmp}/context-agent-openjiuwen.XXXXXX.yaml")"
-  cat > "$generated_config" <<EOF
-user_id: context-agent
+
+  # Use the repository template as base to avoid hardcoding structure in script
+  local repo_template="$PROJECT_DIR/examples/configs/pgvector/openjiuwen.yaml"
+  if [[ -f "$repo_template" ]]; then
+    cp "$repo_template" "$generated_config"
+    
+    # Update dynamic values in the template using python
+    "$PYTHON3" - "$generated_config" "$USER_ID" "$pg_user" "$pg_port" "$pg_db_name" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+user_id = sys.argv[2]
+pg_user = sys.argv[3]
+pg_port = sys.argv[4]
+pg_db_name = sys.argv[5]
+
+if config_path.exists():
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except:
+        data = {}
+    
+    # Update user_id
+    data["user_id"] = user_id
+    
+    # Update DSN
+    if "vector_store" in data and isinstance(data["vector_store"], dict):
+        dsn = f"postgresql://{pg_user}@127.0.0.1:{pg_port}/{pg_db_name}"
+        data["vector_store"]["dsn"] = dsn
+        
+    config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+PY
+  else
+    warn "未找到模板 $repo_template，使用内置默认配置"
+    cat > "$generated_config" <<EOF
+user_id: $USER_ID
 
 llm_config:
   provider: openai
@@ -280,11 +334,13 @@ vector_store:
 memory_config:
   top_k: 10
   score_threshold: 0.3
+  enable_long_term_mem: true
   enable_user_profile: true
   enable_semantic_memory: true
   enable_episodic_memory: true
   enable_summary_memory: true
 EOF
+  fi
 
   merge_generated_config "$generated_config"
   rm -f "$generated_config"

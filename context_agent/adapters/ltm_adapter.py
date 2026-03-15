@@ -384,7 +384,9 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
 
     async def close(self) -> None:
         seen: set[int] = set()
-        for resource in (*self._cleanup_resources, self._ltm):
+        
+        # 1. Close explicitly managed cleanup resources
+        for resource in self._cleanup_resources:
             if resource is None:
                 continue
             resource_id = id(resource)
@@ -392,3 +394,28 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
                 continue
             seen.add(resource_id)
             await _close_resource(resource)
+
+        # 2. Close LTM instance and its internal stores
+        if self._ltm:
+            # Close the LTM instance itself
+            if id(self._ltm) not in seen:
+                seen.add(id(self._ltm))
+                await _close_resource(self._ltm)
+            
+            # Inspect LTM for underlying stores/engines that might need explicit closure
+            # (e.g. sqlalchemy engines inside vector_store/db_store)
+            for attr in ("vector_store", "kv_store", "db_store", "embedding_model", "llm"):
+                store = getattr(self._ltm, attr, None)
+                if store:
+                    # Close the store/component itself
+                    if id(store) not in seen:
+                        seen.add(id(store))
+                        await _close_resource(store)
+                    
+                    # Dig deeper for SQLAlchemy engines (common source of unclosed loops)
+                    for engine_attr in ("engine", "async_engine", "_engine", "_async_engine"):
+                        engine = getattr(store, engine_attr, None)
+                        if engine and id(engine) not in seen:
+                            seen.add(id(engine))
+                            # SQLAlchemy AsyncEngine.dispose() is awaitable
+                            await _close_resource(engine)

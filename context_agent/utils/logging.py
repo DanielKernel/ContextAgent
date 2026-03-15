@@ -36,17 +36,51 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
+        structlog.processors.CallSiteParameterAdder(
+            {
+                structlog.processors.CallSiteParameter.FILENAME,
+                structlog.processors.CallSiteParameter.LINENO,
+                structlog.processors.CallSiteParameter.FUNC_NAME,
+            }
+        ),
         structlog.processors.StackInfoRenderer(),
     ]
 
     if json_output:
         renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer(
-            colors=False,
-            exception_formatter=structlog.dev.plain_traceback,
-        )
+        # Match the pipe-delimited format: TIME | LOGGER | FILE | LINE | FUNC | TRACE | LEVEL | MSG
+        def custom_renderer(_, __, event_dict):
+            timestamp = event_dict.pop("timestamp", "")
+            level = event_dict.pop("level", "").upper()
+            event = event_dict.pop("event", "")
+            logger_name = event_dict.pop("logger", "root")
+            filename = event_dict.pop("filename", "")
+            lineno = event_dict.pop("lineno", "")
+            func_name = event_dict.pop("func_name", "")
+            
+            # Trace ID from context if available
+            trace_id = event_dict.pop("trace_id", "default_trace_id")
+            
+            # Additional context
+            context_str = ""
+            if event_dict:
+                # Format remaining keys as json-like or simple kv
+                # But typically we want the message clean. 
+                # Let's append remaining keys at the end if any.
+                try:
+                    import json
+                    context_str = " " + json.dumps(event_dict, default=str)
+                except:
+                    context_str = " " + str(event_dict)
+
+            return (
+                f"{timestamp} | {logger_name} | {filename} | {lineno} | {func_name} | "
+                f"{trace_id} | {level} | {event}{context_str}"
+            )
+
+        renderer = custom_renderer
 
     structlog.configure(
         processors=[
@@ -92,3 +126,51 @@ def bind_context(**kwargs: object) -> None:
 def clear_context() -> None:
     """Clear all bound context vars (call at request end)."""
     structlog.contextvars.clear_contextvars()
+
+
+def suppress_library_logging() -> int:
+    """Remove handlers from openJiuwen loggers to prevent duplicate output.
+
+    The openJiuwen library attaches StreamHandlers to its loggers upon initialization,
+    which conflicts with our root logger configuration. This function detects
+    these loggers and removes their handlers so logs propagate cleanly to root.
+    """
+    import logging
+    import inspect
+
+    count = 0
+    # 1. Check loaded loggers in logging.Logger.manager.loggerDict
+    for name, logger in logging.Logger.manager.loggerDict.items():
+        if isinstance(logger, logging.Logger) and (
+            name.startswith("openjiuwen") or name in ("common", "interface", "memory", "performance")
+        ):
+            if logger.handlers:
+                for h in list(logger.handlers):
+                    logger.removeHandler(h)
+                count += 1
+                # Ensure propagation is enabled so root logger gets it
+                logger.propagate = True
+
+    # 2. Check LazyLoggers in openjiuwen.core.common.logging if available
+    try:
+        import openjiuwen.core.common.logging as oj_logging
+        
+        # Force initialization if needed
+        if hasattr(oj_logging, "_ensure_initialized"):
+            oj_logging._ensure_initialized()
+            
+        for name, obj in inspect.getmembers(oj_logging):
+            if isinstance(obj, oj_logging.LazyLogger):
+                try:
+                    # Access handlers to trigger init
+                    handlers = getattr(obj, "handlers", [])
+                    if handlers:
+                        for h in list(handlers):
+                            obj.removeHandler(h)
+                        count += 1
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+        
+    return count
