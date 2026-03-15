@@ -265,11 +265,12 @@ SQL
     cp "$repo_template" "$generated_config"
     
     # Update dynamic values in the template using python
-    "$PYTHON3" - "$generated_config" "$USER_ID" "$pg_user" "$pg_port" "$pg_db_name" <<'PY'
+"$PYTHON3" - "$generated_config" "$USER_ID" "$pg_user" "$pg_port" "$pg_db_name" <<'PY'
 import sys
 import yaml
 import os
 import re
+from pathlib import Path
 
 config_path = Path(sys.argv[1])
 user_id = sys.argv[2]
