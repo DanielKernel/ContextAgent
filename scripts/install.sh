@@ -93,15 +93,40 @@ ensure_context_agent_config() {
   mkdir -p "$target_dir"
   if [[ -f "$target_path" ]]; then
     info "检查 ContextAgent 配置更新：$target_path"
+    
+    # Expand env vars in template to handle potential placeholders
+    local temp_template="$(mktemp "${TMPDIR:-/tmp}/context-agent-template-expanded.XXXXXX.yaml")"
+    cp "$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml" "$temp_template"
+    
+    # Currently context_agent.yaml doesn't use env vars in the default template,
+    # but we support it for consistency if added later.
+    "$PYTHON3" - "$temp_template" <<'PY'
+import sys
+import os
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+if config_path.exists():
+    content = config_path.read_text(encoding="utf-8")
+    # Generic expansion for any ${VAR} in the template that matches an env var
+    for key, val in os.environ.items():
+        if f"${{{key}}}" in content or f"${key}" in content:
+            content = content.replace(f"${{{key}}}", val)
+            content = content.replace(f"${key}", val)
+    config_path.write_text(content, encoding="utf-8")
+PY
+
     "$VENV_DIR/bin/python3" "$PROJECT_DIR/context_agent/config/migration.py" \
       --target "$target_path" \
-      --template "$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml" \
+      --template "$temp_template" \
       --force-key budgets.latency.aggregation_timeout_ms \
       --force-key budgets.latency.cold_tier_timeout_ms \
       --force-key budgets.latency.warm_tier_timeout_ms \
       --force-key budgets.latency.hot_tier_timeout_ms \
       --force-key retrieval.timeout_ms \
       --force-key llm.timeout_s >/dev/null 2>&1 || warn "配置迁移失败，跳过"
+    
+    rm -f "$temp_template"
     return 0
   fi
   example_file="$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml"

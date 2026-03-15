@@ -56,6 +56,19 @@ def merge_missing_values(
             continue
 
         existing_value = merged[key]
+        
+        # If existing value is a placeholder string (e.g. ${VAR}), and we have a valid default,
+        # treat it as "missing" and overwrite it with the expanded default.
+        if (
+            isinstance(existing_value, str) 
+            and existing_value.startswith("${") 
+            and existing_value.endswith("}") 
+            and not (isinstance(default_value, str) and default_value.startswith("${"))
+        ):
+            merged[key] = default_value
+            inserted_paths.append(f"{dotted_path} (expanded)")
+            continue
+
         if isinstance(existing_value, dict) and isinstance(default_value, dict):
             nested_merged, nested_paths = merge_missing_values(
                 existing_value,
@@ -102,6 +115,19 @@ def merge_preserving_existing(
             continue
 
         existing_value = existing[key]
+        
+        # If existing value is a placeholder string (e.g. ${VAR}), and we have a valid default,
+        # treat it as "missing" and overwrite it with the expanded default.
+        if (
+            isinstance(existing_value, str) 
+            and existing_value.startswith("${") 
+            and existing_value.endswith("}") 
+            and not (isinstance(default_value, str) and default_value.startswith("${"))
+        ):
+            merged[key] = default_value
+            inserted_paths.append(f"{key} (expanded)")
+            continue
+            
         if isinstance(existing_value, dict) and isinstance(default_value, dict):
             nested_merged, nested_paths = merge_missing_values(
                 existing_value,
