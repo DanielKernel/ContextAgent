@@ -119,7 +119,13 @@ async def test_runtime_health_checker_skips_unconfigured_embedding() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_health_checker_skips_unresolved_embedding_placeholders() -> None:
+async def test_runtime_health_checker_skips_unresolved_embedding_placeholders(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EMBED_MODEL", raising=False)
+    monkeypatch.delenv("EMBED_BASE_URL", raising=False)
+    monkeypatch.delenv("EMBED_API_KEY", raising=False)
+
     checker = RuntimeDependencyHealthChecker(
         settings=Settings(openjiuwen_config_path=""),
         openjiuwen_config={

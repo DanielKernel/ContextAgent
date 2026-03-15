@@ -138,6 +138,9 @@ PY
       --force-key budgets.latency.warm_tier_timeout_ms \
       --force-key budgets.latency.hot_tier_timeout_ms \
       --force-key retrieval.timeout_ms \
+      --force-key compression.llm.base_url \
+      --force-key compression.llm.model \
+      --force-key compression.llm.api_key \
       --force-key llm.timeout_s >/dev/null 2>&1 || warn "配置迁移失败，跳过"
     
     rm -f "$temp_template"

@@ -65,9 +65,9 @@ storage:
 
 compression:
   llm:
-    base_url: ""
-    model: ""
-    api_key: ""
+    base_url: ${CTXLLM_BASE_URL}
+    model: ${CTXLLM_MODEL}
+    api_key: ${CTXLLM_API_KEY}
     timeout_s: 30.0
     max_retries: 2
   compaction_trigger_ratio: 0.85
@@ -166,9 +166,9 @@ auth:
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `llm.base_url` | `str` | `""` | ContextAgent 自身压缩/摘要模型地址；留空时优先复用 `openjiuwen.yaml -> llm_config` |
-| `llm.model` | `str` | `""` | ContextAgent 自身压缩/摘要模型名；留空时优先复用 `openjiuwen.yaml -> llm_config` |
-| `llm.api_key` | `str` | `""` | ContextAgent 自身压缩/摘要 API Key |
+| `llm.base_url` | `str` | `${CTXLLM_BASE_URL}` | ContextAgent 压缩/摘要链路默认复用共享 `CTXLLM_*` 变量，也可手动改为独立 endpoint |
+| `llm.model` | `str` | `${CTXLLM_MODEL}` | ContextAgent 压缩/摘要模型名，默认与 openJiuwen 共用同一组 LLM 变量 |
+| `llm.api_key` | `str` | `${CTXLLM_API_KEY}` | ContextAgent 压缩/摘要 API Key，默认复用共享变量 |
 | `llm.timeout_s` | `float` | `30.0` | 压缩/摘要 LLM 请求超时 |
 | `llm.max_retries` | `int` | `2` | 压缩/摘要 LLM 最大重试次数 |
 | `compaction_trigger_ratio` | `float` | `0.85` | 上下文压缩触发阈值 |
@@ -272,7 +272,7 @@ auth:
 user_id: context-agent
 
 llm_config:
-  provider: openai
+  provider: ${CTXLLM_PROVIDER}
   model: ${CTXLLM_MODEL}
   api_key: ${CTXLLM_API_KEY}
   base_url: ${CTXLLM_BASE_URL}
@@ -280,7 +280,7 @@ llm_config:
   max_retries: 2
 
 embedding_config:
-  provider: openai
+  provider: ${EMBED_PROVIDER}
   model: ${EMBED_MODEL}
   api_key: ${EMBED_API_KEY}
   base_url: ${EMBED_BASE_URL}
@@ -321,6 +321,9 @@ memory_config:
 - `embedding_config.dimension` 与 `vector_store.embedding_dimension` 必须一致
 - `vector_store.table_name` 默认是 `ltm_memory`
 - 切换 qdrant / milvus 时，只改 `openjiuwen.yaml`
+- 推荐使用一套共享环境变量：
+  - `CTXLLM_*` 同时映射到 `context_agent.yaml -> compression.llm` 与 `openjiuwen.yaml -> llm_config`
+  - `EMBED_*` 映射到 `openjiuwen.yaml -> embedding_config`
 
 ### 4.2 哪些内容必须留在 openJiuwen 配置里
 

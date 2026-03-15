@@ -50,6 +50,8 @@ bash scripts/setup-openclaw.sh
 > 若当前 `openJiuwen` 后端不是 `pgvector`，`start-all.sh` / `stop-all.sh` / `restart-all.sh` 会自动跳过本地 pgvector 管理；`restart-pgvector.sh` 会直接提示当前后端不适用。
 >
 > 所有 `scripts/*.sh` 与 `make` 目标都会先尝试加载 `~/.bashrc` / `~/.bash_profile` / `~/.profile`，再补充项目根目录 `.env` 中尚未设置的变量，因此 `openjiuwen.yaml` 里的 `${CTXLLM_*}`、`${EMBED_*}` 等环境变量占位符在非交互执行路径中也能生效。
+>
+> 推荐把 `CTXLLM_*` 作为共享 LLM 变量：安装/升级脚本会同时将它们映射到 `context_agent.yaml -> compression.llm` 和 `openjiuwen.yaml -> llm_config`；`EMBED_*` 则映射到 `openjiuwen.yaml -> embedding_config`。
 
 ---
 
@@ -107,6 +109,7 @@ bash scripts/install.sh --vector-backend milvus
 
 - `context_agent.yaml` 只负责 ContextAgent 自身运行参数：HTTP、Redis、预算、压缩策略、working memory 与检索编排调优
 - `openjiuwen.yaml` 只负责 openJiuwen 相关参数：`llm_config`、`embedding_config`、`vector_store`、`memory_config`
+- 默认模板会复用同一组 `CTXLLM_*` 变量给两边的 LLM 配置，形成“统一模板 + 双映射”
 
 标准命名的示例场景见：
 

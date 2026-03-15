@@ -21,9 +21,9 @@ storage:
 
 compression:
   llm:
-    base_url: ""
-    model: ""
-    api_key: ""
+    base_url: ${CTXLLM_BASE_URL}
+    model: ${CTXLLM_MODEL}
+    api_key: ${CTXLLM_API_KEY}
     timeout_s: 30.0
     max_retries: 2
   compaction_trigger_ratio: 0.85

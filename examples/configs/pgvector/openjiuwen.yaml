@@ -1,7 +1,7 @@
 user_id: openclaw
 
 llm_config:
-  provider: openai
+  provider: ${CTXLLM_PROVIDER}
   model: ${CTXLLM_MODEL}
   api_key: ${CTXLLM_API_KEY}
   base_url: ${CTXLLM_BASE_URL}
@@ -9,7 +9,7 @@ llm_config:
   max_retries: 2
 
 embedding_config:
-  provider: openai
+  provider: ${EMBED_PROVIDER}
   model: ${EMBED_MODEL}
   api_key: ${EMBED_API_KEY}
   base_url: ${EMBED_BASE_URL}

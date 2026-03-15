@@ -194,17 +194,21 @@ def test_expand_config_file_env_vars_rewrites_placeholders_in_place(tmp_path, mo
         "\n".join(
             [
                 "llm_config:",
+                "  provider: ${CTXLLM_PROVIDER}",
                 "  model: ${CTXLLM_MODEL}",
                 "  api_key: ${CTXLLM_API_KEY}",
                 "embedding_config:",
+                "  provider: ${EMBED_PROVIDER}",
                 "  api_key: ${EMBED_API_KEY}",
             ]
         )
         + "\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("CTXLLM_PROVIDER", "dashscope")
     monkeypatch.setenv("CTXLLM_MODEL", "gpt-test")
     monkeypatch.setenv("CTXLLM_API_KEY", "llm-secret")
+    monkeypatch.setenv("EMBED_PROVIDER", "siliconflow")
     monkeypatch.setenv("EMBED_API_KEY", "embed-secret")
 
     result = expand_config_file_env_vars(target)
@@ -216,8 +220,60 @@ def test_expand_config_file_env_vars_rewrites_placeholders_in_place(tmp_path, mo
     }
     assert target.read_text(encoding="utf-8") == (
         "llm_config:\n"
+        "  provider: dashscope\n"
         "  model: gpt-test\n"
         "  api_key: llm-secret\n"
         "embedding_config:\n"
+        "  provider: siliconflow\n"
         "  api_key: embed-secret\n"
     )
+
+
+def test_migrate_config_file_can_force_update_shared_contextagent_llm_fields(tmp_path):
+    target = tmp_path / "context_agent.yaml"
+    template = tmp_path / "template.yaml"
+    target.write_text(
+        "\n".join(
+            [
+                "compression:",
+                "  llm:",
+                "    base_url: \"\"",
+                "    model: \"\"",
+                "    api_key: \"\"",
+                "    timeout_s: 10.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    template.write_text(
+        "\n".join(
+            [
+                "compression:",
+                "  llm:",
+                "    base_url: https://llm.example.com/v1",
+                "    model: shared-model",
+                "    api_key: shared-key",
+                "    timeout_s: 30.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = migrate_config_file(
+        target,
+        template,
+        force_update_keys={
+            "compression.llm.base_url",
+            "compression.llm.model",
+            "compression.llm.api_key",
+        },
+    )
+
+    assert result["mode"] == "merged"
+    text = target.read_text(encoding="utf-8")
+    assert "base_url: https://llm.example.com/v1" in text
+    assert "model: shared-model" in text
+    assert "api_key: shared-key" in text
+    assert "timeout_s: 10.0" in text

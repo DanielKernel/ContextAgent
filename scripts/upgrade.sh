@@ -442,12 +442,19 @@ from pathlib import Path
 config_path = Path(sys.argv[1])
 if config_path.exists():
     content = config_path.read_text(encoding="utf-8")
-    for key in ["CTXLLM_MODEL", "CTXLLM_API_KEY", "CTXLLM_BASE_URL", 
+    provider_defaults = {
+        "CTXLLM_PROVIDER": os.environ.get("CTXLLM_PROVIDER", "openai"),
+        "EMBED_PROVIDER": os.environ.get("EMBED_PROVIDER", "openai"),
+    }
+    for key, val in provider_defaults.items():
+        content = content.replace(f"${{{key}}}", val)
+        content = content.replace(f"${key}", val)
+    for key in ["CTXLLM_MODEL", "CTXLLM_API_KEY", "CTXLLM_BASE_URL",
                 "EMBED_MODEL", "EMBED_API_KEY", "EMBED_BASE_URL"]:
-            val = os.environ.get(key)
-            if val:
-                content = content.replace(f"${{{key}}}", val)
-                content = content.replace(f"${key}", val)
+        val = os.environ.get(key)
+        if val:
+            content = content.replace(f"${{{key}}}", val)
+            content = content.replace(f"${key}", val)
     config_path.write_text(content, encoding="utf-8")
 PY
 
@@ -459,12 +466,17 @@ PY
   --force-key "budgets.latency.warm_tier_timeout_ms" \
   --force-key "budgets.latency.hot_tier_timeout_ms" \
   --force-key "retrieval.timeout_ms" \
+  --force-key "compression.llm.base_url" \
+  --force-key "compression.llm.model" \
+  --force-key "compression.llm.api_key" \
   --force-key "llm.timeout_s" >/dev/null
 "$VENV_DIR/bin/python3" "$PROJECT_DIR/context_agent/config/migration.py" \
   --target "$OPENJIUWEN_CONFIG_PATH" \
   --template "$EXPANDED_OPENJIUWEN_TEMPLATE" \
   --force-key "user_id" \
-  --force-key "llm_config.timeout" >/dev/null
+  --force-key "llm_config.timeout" \
+  --force-key "llm_config.provider" \
+  --force-key "embedding_config.provider" >/dev/null
 rm -f "$EXPANDED_OPENJIUWEN_TEMPLATE" "$EXPANDED_CONTEXT_TEMPLATE"
 success "配置迁移完成（仅补齐缺省字段，不覆盖现有值）"
 

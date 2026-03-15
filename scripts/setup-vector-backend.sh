@@ -118,7 +118,9 @@ merge_generated_config() {
     --template "$template_path" \
     --replace-top-level-key vector_store \
     --force-key user_id \
-    --force-key llm_config.timeout >/dev/null
+    --force-key llm_config.timeout \
+    --force-key llm_config.provider \
+    --force-key embedding_config.provider >/dev/null
 }
 
 copy_example_config() {
@@ -284,12 +286,19 @@ if config_path.exists():
         # Expand environment variables in the raw content first
         # We explicitly handle known vars to ensure correct substitution
         # even if not in current shell env (though they should be via env-bootstrap.sh)
-        for key in ["CTXLLM_MODEL", "CTXLLM_API_KEY", "CTXLLM_BASE_URL", 
+        provider_defaults = {
+            "CTXLLM_PROVIDER": os.environ.get("CTXLLM_PROVIDER", "openai"),
+            "EMBED_PROVIDER": os.environ.get("EMBED_PROVIDER", "openai"),
+        }
+        for key, val in provider_defaults.items():
+            content = content.replace(f"${{{key}}}", val)
+            content = content.replace(f"${key}", val)
+        for key in ["CTXLLM_MODEL", "CTXLLM_API_KEY", "CTXLLM_BASE_URL",
                    "EMBED_MODEL", "EMBED_API_KEY", "EMBED_BASE_URL"]:
-             val = os.environ.get(key)
-             if val:
-                 content = content.replace(f"${{{key}}}", val)
-                 content = content.replace(f"${key}", val)
+            val = os.environ.get(key)
+            if val:
+                content = content.replace(f"${{{key}}}", val)
+                content = content.replace(f"${key}", val)
         
         data = yaml.safe_load(content) or {}
     except Exception as e:
@@ -315,7 +324,7 @@ PY
 user_id: $USER_ID
 
 llm_config:
-  provider: openai
+  provider: ${CTXLLM_PROVIDER:-openai}
   model: ${CTXLLM_MODEL:-placeholder_model}
   api_key: ${CTXLLM_API_KEY:-placeholder_key}
   base_url: ${CTXLLM_BASE_URL:-https://api.openai.com/v1}
@@ -323,7 +332,7 @@ llm_config:
   max_retries: 2
 
 embedding_config:
-  provider: openai
+  provider: ${EMBED_PROVIDER:-openai}
   model: ${EMBED_MODEL:-placeholder_embed}
   api_key: ${EMBED_API_KEY:-placeholder_key}
   base_url: ${EMBED_BASE_URL:-https://api.openai.com/v1}

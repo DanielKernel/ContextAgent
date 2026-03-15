@@ -188,6 +188,10 @@ def load_openjiuwen_config(config_path: str | Path) -> dict[str, Any]:
             f"openJiuwen config must be a mapping: {path}",
             code=ErrorCode.CONFIGURATION_ERROR,
         )
+    for section_name in ("llm_config", "embedding_config"):
+        section = data.get(section_name)
+        if isinstance(section, dict):
+            section["provider"] = _resolve_provider_value(section.get("provider", "openai"))
     return data
 
 
@@ -209,6 +213,42 @@ def _normalize_provider_name(provider: str) -> str:
 
 def _is_unresolved_placeholder(value: object) -> bool:
     return isinstance(value, str) and bool(_PLACEHOLDER_PATTERN.search(value))
+
+
+def _resolve_provider_value(provider: object, *, default: str = "openai") -> str:
+    if not isinstance(provider, str):
+        return default
+    normalized = provider.strip()
+    if not normalized or _is_unresolved_placeholder(normalized):
+        return default
+    return normalized
+
+
+def _build_embedding_config_instance(
+    embedding_config_cls: type,
+    embedding_config: dict[str, Any],
+) -> Any:
+    kwargs = {
+        "model_name": embedding_config.get("model", ""),
+        "base_url": embedding_config.get("base_url", ""),
+        "api_key": embedding_config.get("api_key", ""),
+    }
+    provider = _normalize_provider_name(
+        _resolve_provider_value(embedding_config.get("provider", "openai"))
+    )
+    try:
+        signature = inspect.signature(embedding_config_cls)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature is not None:
+        parameters = signature.parameters
+        if "provider" in parameters or any(
+            param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+        ):
+            kwargs["provider"] = provider
+
+    return embedding_config_cls(**kwargs)
 
 
 def _settings_llm_uses_builtin_defaults(settings: Settings) -> bool:
@@ -322,7 +362,9 @@ def _build_model_configs(config: dict[str, Any]) -> tuple[Any | None, Any | None
     verify_ssl, ssl_cert = _resolve_ssl_cert_path(llm_config)
     _export_safe_cert_dir(ssl_cert)
     client_config = ModelClientConfig(
-        client_provider=_normalize_provider_name(llm_config.get("provider", "openai")),
+        client_provider=_normalize_provider_name(
+            _resolve_provider_value(llm_config.get("provider", "openai"))
+        ),
         api_key=llm_config.get("api_key", ""),
         api_base=llm_config.get("base_url", ""),
         timeout=llm_config.get("timeout", 30),
@@ -359,12 +401,8 @@ def _build_embedding_model(config: dict[str, Any]) -> Any | None:
         "openjiuwen.core.foundation.store.base_embedding",
         "EmbeddingConfig",
     )
-    embed_config = EmbeddingConfig(
-        model_name=embedding_config.get("model", ""),
-        base_url=embedding_config.get("base_url", ""),
-        api_key=embedding_config.get("api_key"),
-    )
-    provider = str(embedding_config.get("provider", "openai")).strip().lower()
+    embed_config = _build_embedding_config_instance(EmbeddingConfig, embedding_config)
+    provider = _resolve_provider_value(embedding_config.get("provider", "openai")).lower()
     embedding_timeout = embedding_config.get("timeout", 60)
     embedding_retries = embedding_config.get("max_retries", 3)
     embedding_batch_size = embedding_config.get("batch_size", 8)
@@ -414,10 +452,9 @@ def _build_memory_engine_config(config: dict[str, Any]) -> Any:
     embedding_config = config.get("embedding_config", {})
     scope_embedding_config = None
     if isinstance(embedding_config, dict) and embedding_config:
-        scope_embedding_config = EmbeddingConfig(
-            model_name=embedding_config.get("model", ""),
-            base_url=embedding_config.get("base_url", ""),
-            api_key=embedding_config.get("api_key", ""),
+        scope_embedding_config = _build_embedding_config_instance(
+            EmbeddingConfig,
+            embedding_config,
         )
 
     return MemoryEngineConfig(
@@ -440,10 +477,9 @@ def _build_memory_scope_config(config: dict[str, Any]) -> Any:
     embedding_config = config.get("embedding_config", {})
     scope_embedding_config = None
     if isinstance(embedding_config, dict) and embedding_config:
-        scope_embedding_config = EmbeddingConfig(
-            model_name=embedding_config.get("model", ""),
-            base_url=embedding_config.get("base_url", ""),
-            api_key=embedding_config.get("api_key", ""),
+        scope_embedding_config = _build_embedding_config_instance(
+            EmbeddingConfig,
+            embedding_config,
         )
     return MemoryScopeConfig(
         model_cfg=request_config,

@@ -10,6 +10,7 @@ import pytest
 from context_agent.api.router import ContextAPIRouter
 from context_agent.config.openjiuwen import (
     _bootstrap_long_term_memory,
+    _build_embedding_config_instance,
     _build_db_store,
     _build_embedding_model,
     _build_model_configs,
@@ -352,15 +353,41 @@ def test_instantiate_long_term_memory_with_no_arg_constructor():
 
 def test_expand_env_placeholders_recursively(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
+    monkeypatch.setenv("CTXLLM_PROVIDER", "dashscope")
     config = {
-        "llm_config": {"api_key": "${OPENAI_API_KEY}"},
+        "llm_config": {
+            "api_key": "${OPENAI_API_KEY}",
+            "provider": "${CTXLLM_PROVIDER}",
+        },
         "nested": ["${OPENAI_API_KEY}"],
     }
 
     expanded = _expand_env_placeholders(config)
 
     assert expanded["llm_config"]["api_key"] == "secret"
+    assert expanded["llm_config"]["provider"] == "dashscope"
     assert expanded["nested"] == ["secret"]
+
+
+def test_load_openjiuwen_config_defaults_unresolved_provider_placeholders(tmp_path):
+    config_path = tmp_path / "openjiuwen.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "user_id: openclaw",
+                "llm_config:",
+                "  provider: ${CTXLLM_PROVIDER}",
+                "embedding_config:",
+                "  provider: ${EMBED_PROVIDER}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_openjiuwen_config(config_path)
+
+    assert config["llm_config"]["provider"] == "openai"
+    assert config["embedding_config"]["provider"] == "openai"
 
 def test_normalize_async_dsn_for_postgres():
     dsn = "postgresql://postgres@127.0.0.1:55432/context_agent?sslmode=disable"
@@ -498,6 +525,59 @@ def test_build_model_configs_preserves_explicit_ssl_settings(monkeypatch):
 
     assert client_config.kwargs["verify_ssl"] is False
     assert client_config.kwargs["ssl_cert"] is None
+
+
+def test_build_model_configs_defaults_unresolved_provider_to_openai(monkeypatch):
+    class FakeModelRequestConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeModelClientConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_import(module_name, symbol_name):
+        if symbol_name == "ModelRequestConfig":
+            return FakeModelRequestConfig
+        if symbol_name == "ModelClientConfig":
+            return FakeModelClientConfig
+        raise AssertionError((module_name, symbol_name))
+
+    monkeypatch.setattr(
+        "context_agent.config.openjiuwen._import_openjiuwen_symbol",
+        _fake_import,
+    )
+
+    _, client_config = _build_model_configs(
+        {
+            "llm_config": {
+                "provider": "${CTXLLM_PROVIDER}",
+                "model": "demo-model",
+                "api_key": "secret",
+                "base_url": "https://llm.example.com",
+            }
+        }
+    )
+
+    assert client_config.kwargs["client_provider"] == "OpenAI"
+
+
+def test_build_embedding_config_instance_includes_provider_when_supported():
+    class FakeEmbeddingConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    instance = _build_embedding_config_instance(
+        FakeEmbeddingConfig,
+        {
+            "provider": "dashscope",
+            "model": "text-embedding",
+            "base_url": "https://embed.example.com",
+            "api_key": "secret",
+        },
+    )
+
+    assert instance.kwargs["provider"] == "DashScope"
 
 
 def test_build_embedding_model_exports_ssl_env(monkeypatch, tmp_path):
