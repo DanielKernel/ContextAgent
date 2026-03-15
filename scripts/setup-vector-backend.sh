@@ -268,7 +268,8 @@ SQL
     "$PYTHON3" - "$generated_config" "$USER_ID" "$pg_user" "$pg_port" "$pg_db_name" <<'PY'
 import sys
 import yaml
-from pathlib import Path
+import os
+import re
 
 config_path = Path(sys.argv[1])
 user_id = sys.argv[2]
@@ -278,15 +279,30 @@ pg_db_name = sys.argv[5]
 
 if config_path.exists():
     try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except:
+        content = config_path.read_text(encoding="utf-8")
+        # Expand environment variables in the raw content first
+        # We explicitly handle known vars to ensure correct substitution
+        # even if not in current shell env (though they should be via env-bootstrap.sh)
+        for key in ["CTXLLM_MODEL", "CTXLLM_API_KEY", "CTXLLM_BASE_URL", 
+                   "EMBED_MODEL", "EMBED_API_KEY", "EMBED_BASE_URL"]:
+             val = os.environ.get(key)
+             if val:
+                 content = content.replace(f"${{{key}}}", val)
+                 content = content.replace(f"${key}", val)
+        
+        data = yaml.safe_load(content) or {}
+    except Exception as e:
+        print(f"[WARN] Failed to parse config for env expansion: {e}")
         data = {}
     
     # Update user_id
-    data["user_id"] = user_id
+    if "user_id" in data:
+        data["user_id"] = user_id
     
     # Update DSN
     if "vector_store" in data and isinstance(data["vector_store"], dict):
+        # Only update DSN if using pgvector and dynamic
+        # Or just construct it
         dsn = f"postgresql://{pg_user}@127.0.0.1:{pg_port}/{pg_db_name}"
         data["vector_store"]["dsn"] = dsn
         
@@ -299,17 +315,17 @@ user_id: $USER_ID
 
 llm_config:
   provider: openai
-  model: \${CTXLLM_MODEL}
-  api_key: \${CTXLLM_API_KEY}
-  base_url: \${CTXLLM_BASE_URL}
+  model: ${CTXLLM_MODEL:-placeholder_model}
+  api_key: ${CTXLLM_API_KEY:-placeholder_key}
+  base_url: ${CTXLLM_BASE_URL:-https://api.openai.com/v1}
   timeout: 30
   max_retries: 2
 
 embedding_config:
   provider: openai
-  model: \${EMBED_MODEL}
-  api_key: \${EMBED_API_KEY}
-  base_url: \${EMBED_BASE_URL}
+  model: ${EMBED_MODEL:-placeholder_embed}
+  api_key: ${EMBED_API_KEY:-placeholder_key}
+  base_url: ${EMBED_BASE_URL:-https://api.openai.com/v1}
   dimension: 1024
   batch_size: 10
 
