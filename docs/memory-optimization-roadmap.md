@@ -196,6 +196,611 @@
 5. 个性化记忆仍缺少“演化”层，而不只是静态 profile。
 6. sub-agent handoff 仍偏可见性过滤，而非基于 episode 的证据提炼和连续推理。
 
+### 3.4 长期记忆触发与结构化抽取专项分析
+
+这一节聚焦一个更具体、也更容易被用户直接感知的问题：
+
+- 哪些消息会进入长期记忆？
+- 这些触发条件现在如何维护？
+- 能否直接复用 `openJiuwen` 的能力？
+- 如何在不过度误记的前提下，提高“用户事实 / 偏好 /经验结论”的长期写入质量？
+
+#### 3.4.1 ContextAgent 当前实现：静态硬编码 trigger，不会自动学习
+
+当前 `ContextAgent` 的长期记忆写入前置判断，核心仍在 `MemoryOrchestrator._classify_message()`。
+
+现状可以概括为：
+
+- 通过几组 marker / substring heuristic 判断消息是否像：
+  - `preference`
+  - `profile`
+  - `conclusion`
+- 只有命中这些规则，或调用方显式指定 `requested_memory_type`，才会进入异步长期写入链路
+- 普通消息默认仍走 `working_memory_only`
+
+这意味着：
+
+- trigger 当前由代码维护
+- trigger 不是配置化数据
+- trigger 不会自动学习
+- 新增 trigger 必须改代码并补测试
+
+所以像 `记住我住在上海市青浦区` 这种输入，如果没有命中现有画像类规则，就很容易被归入 `working_memory_only`。
+
+#### 3.4.2 为什么不能简单把裸词 `记住` 加进规则
+
+表面上看，给规则里补一个 `记住` 似乎能解决问题；但这会带来高误判率。
+
+典型误判包括：
+
+- `记住这个报错日志`
+- `记住这一步怎么复现`
+- `记住这个临时目录`
+- `记住这次排查结论，等会儿还要用`
+
+这些内容通常属于：
+
+- 当前任务上下文
+- 临时 working memory
+- 本轮排查证据
+
+而不是应该跨 session 长期保存的用户稳定事实。
+
+因此，“增加 trigger” 不能停留在“多加几个关键词”，而要转向：
+
+- 更高精度的 pattern
+- 更稳定的类型分类
+- 更明确的结构化抽取
+- 更严格的负样本过滤
+
+#### 3.4.3 openJiuwen 上游是怎么做的，哪些能力可直接复用
+
+结合上游 `openJiuwen-ai/agent-core` 当前实现，可以确认它并不只是一个“向量库写入壳子”。
+
+上游 `LongTermMemory` / `Generator` 链路至少包含这些能力：
+
+- `Generator.gen_all_memory()` 会对消息做统一记忆生成
+- 其中会调用 `MemoryAnalyzer.analyze(...)`
+- 在开启 `enable_long_term_mem` 时，还会继续走 `LongTermMemoryExtractor.extract_long_term_memory(...)`
+- 抽取结果会映射到：
+  - `user_profile`
+  - `semantic_memory`
+  - `episodic_memory`
+- 上游还提供 `MemUpdateChecker`
+  - 用 LLM 对新旧记忆做 `redundant / conflicting / none` 判定
+  - 输出 `ADD / DELETE` 这类结构化动作
+  - 失败时保守降级，不阻塞新记忆写入
+
+这说明 `openJiuwen` 的重心是：
+
+- 消息级输入
+- 历史上下文参与
+- 类型分析与抽取
+- 写入后治理（冲突 / 冗余处理）
+
+这与 `ContextAgent` 当前“先做粗 trigger，再决定要不要 enqueue”的方式并不相同。
+
+##### 可直接复用的能力
+
+`ContextAgent` 当前最适合直接借用 `openJiuwen` 的，是以下几类能力：
+
+- `Generator / MemoryAnalyzer / LongTermMemoryExtractor` 提供的抽取思路
+- `MemUpdateChecker` 提供的后置去重 / 冲突治理
+- scope 级配置开关：
+  - `enable_long_term_mem`
+  - `enable_user_profile`
+  - `enable_semantic_memory`
+  - `enable_episodic_memory`
+
+##### 不能直接“全盘替换”的部分
+
+但这并不意味着可以直接删掉 `ContextAgent` 的前置层，原因有三点：
+
+1. `ContextAgent` 需要控制成本
+   - 不是每条消息都值得进入高成本抽取链路。
+2. `ContextAgent` 需要兼容现有异步队列 / working memory / API 语义
+   - 例如 `/context/write` 当前仍强调 working-memory-first。
+3. 当前接入方式是 `ContextAgent` 先做入队判断，再把消息交给 `OpenJiuwenLTMAdapter`
+   - 如果前置层不升级，很多消息根本到不了 `openJiuwen`。
+
+因此，更合理的边界不是“用 openJiuwen 取代 ContextAgent”，而是：
+
+- `ContextAgent` 负责候选筛选、入口编排与低成本决策
+- `openJiuwen` 负责高价值候选的抽取、治理与持久化
+
+#### 3.4.4 与 openJiuwen 的协同方式：推荐先做 message-in，再考虑 candidate-memory-in
+
+从架构上看，`ContextAgent` 与 `openJiuwen` 至少有两种协同模式。
+
+##### 模式 A：message-in
+
+- `ContextAgent` 传原始消息
+- `openJiuwen` 负责抽取与后置治理
+
+优点：
+
+- 与当前 `OpenJiuwenLTMAdapter.add_messages()` 链路最一致
+- 改造成本最低
+- 可以先把“前置筛选是否 enqueue”做得更准确
+
+缺点：
+
+- 抽取结果的可控性较弱
+- 想做产品级 schema 管理时，ContextAgent 编排层感知较少
+
+##### 模式 B：candidate-memory-in
+
+- `ContextAgent` 先完成结构化候选记忆抽取
+- 再把候选记忆交给 `openJiuwen` 做治理与落库
+
+优点：
+
+- 对类型、字段、schema、审计更可控
+- 更适合做多语言 / 多产品线 / 多业务 schema
+
+缺点：
+
+- 需要重新定义 adapter 语义
+- 需要明确哪些步骤由 ContextAgent 做，哪些由 openJiuwen 做
+
+当前更推荐的落地顺序是：
+
+1. 先保持 **message-in**
+2. 把前置筛选从“硬编码 substring”升级为“可配置规则 + 分类”
+3. 等 schema 与治理边界稳定后，再评估是否升级到 **candidate-memory-in**
+
+#### 3.4.5 业界实践与开源项目的技术启发
+
+这里不把外部系统视为“可直接照搬的标准答案”，而是把它们作为不同设计取向的样本。
+
+##### OpenAI 生态：强调结构化输出与外部记忆层编排
+
+公开 Cookbook 更像“能力原料库”，它没有提供一整套统一 memory framework，但长期给出的方向非常稳定：
+
+- 通过 structured output / JSON schema 约束模型输出
+- 通过 tool calling 把“分类 / 抽取 / 写入”拆成可编排步骤
+- 通过 retrieval / external store 把长期记忆放在模型外部
+
+可借鉴点：
+
+- 长期记忆抽取结果应尽可能结构化
+- “是否写入”与“写入什么”应是明确步骤，而不是被埋在字符串规则中
+
+##### Anthropic 生态：强调 classification、JSON mode、tool use、prompt caching
+
+Anthropic Cookbook 同样不是一个 memory 框架，但它非常明确地支持以下构件：
+
+- classification
+- JSON mode
+- tool use
+- prompt caching
+
+这对长期记忆管线的启发非常直接：
+
+- 用小模型 / 子调用做 `should_persist + memory_type` 分类
+- 用 JSON mode 保证抽取结果结构稳定
+- 用 prompt caching 降低长期记忆抽取成本
+
+##### Mem0：强调 memory layer、消息级写入和多层 scope
+
+`Mem0` 的产品形态更接近完整的 memory layer：
+
+- 直接对外暴露 `memory.add(messages, user_id=...)`
+- 由 memory engine 自己处理 fact extraction / memory updates
+- 强调多层 scope：
+  - user
+  - session
+  - agent
+- 公开材料强调：
+  - 相比全量上下文更低 token
+  - 更低时延
+  - 更高准确率
+
+可借鉴点：
+
+- `ContextAgent` 也应把长期记忆当作一个“独立能力层”
+- `user / session / agent` 三层边界值得继续强化
+- 应尽量减少业务层对零散 trigger 的直接依赖
+
+##### MemOS / Memos：强调 memory backend / platform 化
+
+这类系统的特点是：
+
+- 把 memory 当作统一平台能力
+- 强调与 MCP / agent framework 集成
+- 更关注“统一接入层 + 可替换后端”，而不是只关注单条记忆提取
+
+可借鉴点：
+
+- 规则、schema、prompt、backend 选择都应配置化
+- `ContextAgent` 需要一个更稳定的 memory interface，而不是在 handler 里堆逻辑
+
+##### Memobase：强调长期用户记忆 backend 与多语言 prompt
+
+`Memobase` 明确强调：
+
+- 长期用户记忆 backend
+- 多语言 prompt 支持
+
+可借鉴点：
+
+- 中文 / 英文 / 日文等语言不应共用一套简陋 substring 规则
+- pattern、schema、prompt 最好支持按语言配置
+
+##### Mem9：强调 server-first、stateless plugin、统一 memory API
+
+`mem9-ai/mem9` 的设计取向非常鲜明：
+
+- 定位是 **Persistent Memory for AI Agents**
+- 采用 **独立 server + stateless agent plugins** 架构
+- 支持 Claude Code、OpenCode、OpenClaw 等插件接入
+- 提供统一 memory CRUD / search API
+- 后端强调：
+  - hybrid vector + keyword search
+  - centralized tenant / auth / rate-limit
+  - shared memory pool
+- roadmap 里明确规划：
+  - LLM-assisted conflict merge
+  - auto-tagging
+
+可借鉴点：
+
+- “插件无状态、服务端集中治理” 是很强的架构边界
+- 长期记忆能力应尽量独立于具体 agent 进程
+- 先把搜索 / 持久化 / 接口边界做好，再逐步引入更强治理，是更稳健的演进顺序
+
+#### 3.4.6 推荐方案：从硬编码 trigger 升级到“可配置规则 + 类型分类 + 结构化抽取 + openJiuwen 治理”
+
+##### 第一层：可配置规则筛选
+
+目标：
+
+- 低成本识别“可能值得长期保存”的候选消息
+- 避免每条消息都进入高成本抽取链路
+
+建议配置化，而不是继续硬编码在 Python 里：
+
+- `memory.trigger_rules.profile`
+- `memory.trigger_rules.preference`
+- `memory.trigger_rules.episodic`
+- `memory.trigger_rules.explicit_intent`
+- `memory.negative_rules`
+
+每条规则建议至少包含：
+
+- `id`
+- `enabled`
+- `languages`
+- `pattern`
+- `match_type`
+- `target_type`
+- `priority`
+- `confidence`
+
+短期高价值中文 pattern 包括：
+
+- `我住在`
+- `我来自`
+- `我目前住在`
+- `我家在`
+- `记住我`
+- `请记住我`
+
+而不推荐直接使用裸词：
+
+- `记住`
+
+##### 第二层：可配置类型分类
+
+对规则命中的候选，再做更细分类：
+
+- `profile / semantic`
+- `preference / procedural`
+- `episodic conclusion`
+- `reject / working memory only`
+
+这层建议支持两种 backend：
+
+- `rule_only`
+- `llm_assisted`
+
+典型输出 schema 应固定为：
+
+- `should_persist`
+- `memory_type`
+- `category`
+- `confidence`
+- `reason`
+- `extracted_fact`
+
+##### 第三层：可配置结构化抽取
+
+对于已经确定应该进入长期记忆的消息，不建议直接整句原文入库。
+
+更稳健的做法是抽成结构化字段，例如：
+
+- 输入：`记住我住在上海市青浦区`
+- 抽取：
+  - `memory_type = semantic`
+  - `category = profile`
+  - `fact_type = residence`
+  - `fact_value = 上海市青浦区`
+  - `raw_text = 记住我住在上海市青浦区`
+
+这样能显著改善：
+
+- 去重
+- 冲突识别
+- schema 演化
+- 检索稳定性
+
+##### 第四层：openJiuwen 后置治理
+
+这一层继续交给 `openJiuwen` 更合适：
+
+- 新旧记忆冗余判断
+- 冲突处理
+- 最终写入管理
+
+这正好对应上游 `MemUpdateChecker` 的能力边界。
+
+#### 3.4.7 防误判策略
+
+为了避免“触发率提高了，但误记更多”，至少要同时上以下约束：
+
+1. **negative patterns**
+   - 明确排除临时上下文：
+     - `记住这个报错`
+     - `记住这一步`
+     - `记住这个目录`
+2. **slot validation**
+   - profile 类消息必须抽出明确字段和值；抽不出来就不要入长期记忆
+3. **confidence threshold**
+   - 弱信号不直接持久化
+4. **scope-aware gating**
+   - 当前任务态信息优先进 working memory，而不是 LTM
+5. **post-check**
+   - 让 `openJiuwen` 继续承担新旧记忆治理
+
+#### 3.4.8 分阶段落地建议
+
+##### Phase 1：高精度规则补齐 + 测试
+
+先不改整体架构，只做：
+
+- 增补高精度中文画像 / 偏好 pattern
+- 增补负样本规则
+- 为典型样例补测试：
+  - `记住我住在上海`
+  - `我住在上海`
+  - `记住这个报错日志`
+  - `记住这一步复现`
+
+##### Phase 2：规则 / 类型 / schema 配置化
+
+把散落在代码里的规则和分类参数抽到配置中：
+
+- 便于 install / upgrade 自动补新配置项
+- 便于多语言扩展
+- 便于灰度开关和线上调优
+
+##### Phase 3：规则筛选 + 轻量分类 + 结构化抽取 + openJiuwen 治理协同
+
+在不绕过 `openJiuwen` 的前提下，逐步形成：
+
+- ContextAgent 负责前置筛选、分类、抽取编排
+- openJiuwen 负责后置治理、冲突处理和持久化
+
+这也是当前最符合本仓库边界约束的长期方向：
+
+- **不修改 openJiuwen 上游源码**
+- **尽量复用其抽取与治理能力**
+- **把 ContextAgent 的 trigger 逻辑从硬编码启发式升级为可配置、可审计、可演化的 memory pipeline**
+
+### 3.5 当前多轮对话相关硬编码清单
+
+从“多轮对话体验”的角度看，当前最值得优先处理的，不只是能力缺口，还有一批已经开始限制演进速度的硬编码。
+
+#### 3.5.1 写入侧硬编码
+
+位置：
+
+- `context_agent/core/memory/orchestrator.py`
+
+当前硬编码包括：
+
+- `_classify_message()` 中的：
+  - `preference_markers`
+  - `profile_markers`
+  - `conclusion_markers`
+- 默认兜底：
+  - `should_persist = False`
+  - `memory_type = VARIABLE`
+  - `reason = working_memory_only`
+
+这意味着：
+
+- trigger 覆盖提升必须改代码
+- 多语言规则扩展必须改代码
+- 负样本过滤无法独立演化
+- 触发后类型判定无法灵活灰度
+
+#### 3.5.2 召回侧硬编码
+
+位置：
+
+- `context_agent/orchestration/context_aggregator.py`
+
+当前硬编码包括：
+
+- LTM 标准检索：
+  - `self._ltm.search(request.scope_id, request.query, request.top_k)`
+- quality 模式 fallback：
+  - 没有 richer hint 时仍回到同样的标准 search
+- working memory 读取：
+  - `to_context_items(scope_id, session_id)`
+
+当前还没有显式进入检索 contract 的信息包括：
+
+- `turn_index`
+- `previous_context_ids`
+- `episode_id`
+- `dialogue_topic`
+- `topic_shift`
+- `continuity_hints`
+
+这会让召回更像单轮 query 检索，而不是多轮对话连续体检索。
+
+#### 3.5.3 rerank / pruning 侧硬编码
+
+位置：
+
+- `context_agent/core/retrieval/task_conditioning.py`
+
+当前硬编码包括：
+
+- 固定 task 类型：
+  - `qa`
+  - `task`
+  - `long_session`
+  - `realtime`
+  - `compaction`
+- 固定 agent role：
+  - `planner`
+  - `executor`
+  - `reviewer`
+- 固定 bonus / penalty 数值
+- 固定 if/elif 条件树
+
+这意味着：
+
+- 想从 rerank 升级到 pruning / coverage-aware selection 时，很容易继续堆条件分支
+- 路由策略还没有被抽象成配置或策略层
+
+#### 3.5.4 基线与文档漂移
+
+当前还存在一类容易被忽略、但会误导优化判断的“固化假设漂移”。
+
+典型例子（也是本轮已识别并应清理的漂移）：
+
+- `context_agent/config/settings.py` 和 `config/context_agent.yaml` 中：
+  - `aggregation_timeout_ms` 默认已是 `2000.0`
+- 在本轮修正前，`docs/agent-integration-guide.md` 中仍出现：
+  - `aggregation_timeout_ms: 200.0`
+  - 表格默认值 `200.0`
+
+如果不先清理这种基线漂移，后续路线图中的优先级判断也会被过时默认值污染。
+
+### 3.6 硬编码优先重构计划
+
+对“改善多轮对话体验”这条路线来说，硬编码问题不只是技术债，而是**前置阻塞项**。
+
+因此建议在主路线里显式加入一层：
+
+- **P0-0：硬编码解耦 / 配置化重构**
+
+其目标不是立刻把所有能力做完，而是先把后续演进的接口面打开。
+
+#### 3.6.1 第一类前置重构：LTM trigger / classification 解耦
+
+目标：
+
+- 让 trigger 词、负样本规则、语言分层、基础类型判定从代码常量中抽离
+
+建议方向：
+
+- 配置化 trigger rules
+- 配置化 negative rules
+- 配置化 language buckets
+- 配置化 trigger -> memory_type / category 映射
+
+#### 3.6.2 第二类前置重构：Recall contract 解耦
+
+目标：
+
+- 让 `ContextAggregator` 及其下游检索链路能显式消费 continuity / topic / episode 信号
+
+建议方向：
+
+- 为聚合请求增加 continuity metadata
+- 为 LTM recall 明确 richer input contract
+- 为 topic recovery / carryover 提前定义输入字段
+
+#### 3.6.3 第三类前置重构：task-conditioned scoring 解耦
+
+目标：
+
+- 把固定 bonus 表、固定 task/role 条件树抽象成配置或策略表
+
+建议方向：
+
+- 任务类型配置化
+- 角色偏置配置化
+- bonus / penalty 策略表配置化
+- 为未来 pruning / coverage-aware selection 预留接口
+
+#### 3.6.4 第四类前置重构：基线漂移清理
+
+目标：
+
+- 清理实现、配置模板、文档样例之间的默认值漂移
+
+重点包括：
+
+- timeout
+- top_k
+- mode 默认值
+- 任何会影响路线判断的“默认行为”
+
+### 3.7 长期记忆触发能力提升
+
+长期记忆 trigger 问题不应只被当成“硬编码待解耦”，它本身也应该被视为一项基础能力提升。
+
+换句话说，这里至少有两件事：
+
+1. **触发机制重构**
+   - 把 trigger 从硬编码改成配置 / 契约
+2. **触发能力提升**
+   - 提升 trigger 覆盖率、精度和可运营性
+
+#### 3.7.1 为什么它属于基础能力，而不只是技术债
+
+因为多轮对话体验的第一步不是“更聪明地召回”，而是“有价值的信息先写得进去”。
+
+如果以下信息经常写不进长期记忆：
+
+- 用户稳定画像
+- 长期偏好
+- 会话中形成的重要结论
+
+那么后续：
+
+- recall
+- carryover
+- topic recovery
+- preference evolution
+
+都会变成无源之水。
+
+#### 3.7.2 建议把 trigger 能力提升明确列入 P0-A
+
+这项能力应至少覆盖：
+
+- 高精度中文 trigger 补齐
+  - 例如 `我住在`、`我来自`、`记住我`、`请记住我`
+- negative rules
+  - 例如排除 `记住这个报错`、`记住这一步`
+- language segmentation
+  - 中文 / 英文等规则分层
+- trigger 后的基础类型判定
+  - profile / preference / episodic / reject
+
+这项能力应被写成：
+
+- **LTM trigger capability uplift + write quality**
+
+而不是只写成“trigger 配置化”。
+
 ---
 
 ## 4. 能力全景与对比矩阵
@@ -447,83 +1052,132 @@
 5. **topic 切换恢复能力**：在多个 subtask / episode 间切换后能快速回到正确上下文
 6. **委托后的连续性**：sub-agent 能延续主线程并回传证据而不是裸结果
 
-### 7.2 P0：最直接改善多轮体验的能力
+### 7.2 P0-0：先做硬编码解耦 / 配置化重构
 
-1. **Turn-aware context carryover + anti-redundancy selection**
+1. **LTM trigger / classification hardcoding refactor**
+   - 对应位置：`MemoryOrchestrator._classify_message()`
+   - 目标：把 trigger markers、negative rules、language segmentation、基础类型判定从代码常量抽离
+
+2. **Recall contract hardcoding refactor**
+   - 对应位置：`ContextAggregator`、`OpenJiuwenLTMAdapter`
+   - 目标：给 recall 链路补 continuity / episode / topic 契约
+
+3. **Task-conditioned scoring hardcoding refactor**
+   - 对应位置：`task_conditioning.py`
+   - 目标：把 task / role / bonus 条件树抽象成配置或策略层
+
+4. **Baseline drift cleanup**
+   - 对应位置：配置模板与文档样例
+   - 目标：先清理 timeout / 默认值漂移，避免路线图基线失真
+
+### 7.3 P0-A：先补足“记得住 + 想得起 + 不重复”
+
+1. **LTM trigger capability uplift + write quality**
+   - 能力类型：增强型
+   - 对应能力簇：semantic abstraction、user-centric personalization
+   - 代表论文：TraceMem、Memoria、MemWeaver
+   - 代表项目 / 实践：`Mem0`、`Memobase`、`LangMem`
+   - 目标模块：`MemoryOrchestrator`、`AsyncMemoryProcessor`、`OpenJiuwenLTMAdapter`
+   - 重点：高精度 trigger、negative rules、语言分层、触发后基础类型判定
+
+2. **Turn-aware context carryover + anti-redundancy selection**
    - 能力类型：新增型
    - 对应能力簇：cross-turn carryover、retrieval routing
    - 代表论文：STaR、E-mem
    - 代表项目 / 实践：`Letta`、`Mem0`、`Zep`
    - 目标模块：`OpenClaw assemble`、`ContextAPIRouter`、`ContextAggregator`、`task_conditioning.py`
 
-2. **Episode consolidation + narrative memory before LTM write**
+3. **Topic / episode-aware LTM recall**
+   - 能力类型：增强型
+   - 对应能力簇：retrieval routing / gating、episodic consolidation
+   - 代表论文：ShardMemo、TraceMem、MemWeaver
+   - 代表项目 / 实践：`Graphiti`、`GraphRAG`、`nano-graphrag`
+   - 目标模块：`ContextAggregator`、`UnifiedSearchCoordinator`、`OpenJiuwenLTMAdapter`
+
+4. **Episode consolidation + narrative memory before LTM write**
    - 能力类型：新增型偏增强
    - 对应能力簇：episodic consolidation、user-centric personalization
    - 代表论文：TraceMem、MemWeaver、Memoria
    - 代表项目 / 实践：`Memobase`、`Graphiti`、`NovelGenerator`
    - 目标模块：`MemoryOrchestrator`、`AsyncMemoryProcessor`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
 
-3. **Dialogue-aware compression for long_session / compaction**
+5. **Dialogue-aware compression for long_session / compaction**
    - 能力类型：增强型
    - 对应能力簇：compression / abstraction balancing
    - 代表论文：MEMORA、TraceMem、STaR
    - 代表项目 / 实践：`Letta`、`Zep`、`MemAlign`
    - 目标模块：`CompressionStrategyRouter`、压缩策略注册表、`openclaw_handler.compact`
 
-4. **Scope-before-routing + episode/topic gating**
+### 7.4 P0-B：在上述基础上增强演化与筛选质量
+
+1. **Scope-before-routing + episode/topic gating**
    - 能力类型：增强型
    - 对应能力簇：retrieval routing / gating
    - 代表论文：ShardMemo、STaR
    - 代表项目 / 实践：`Graphiti`、`GraphRAG`、`nano-graphrag`
    - 目标模块：`UnifiedSearchCoordinator`、`TieredMemoryRouter`、`OpenJiuwenLTMAdapter`
 
-5. **User preference evolution / personalized memory card**
+2. **User preference evolution / personalized memory card**
    - 能力类型：增强型
    - 对应能力簇：semantic abstraction、user-centric personalization
    - 代表论文：TraceMem、Memoria、Mem-PAL
    - 代表项目 / 实践：`Mem0`、`LangMem`、`Memobase`
    - 目标模块：`MemoryOrchestrator`、`WorkingMemoryManager`、`OpenJiuwenLTMAdapter`
 
-6. **Task-conditioned retrieval 从 rerank 升级为 pruning + coverage-aware selection**
+3. **Task-conditioned retrieval 从 rerank 升级为 pruning + coverage-aware selection**
    - 能力类型：增强型
    - 对应能力簇：retrieval routing / anti-redundancy
    - 代表论文：STaR、MEMORA
    - 代表项目 / 实践：`GraphRAG`、`LlamaIndex`、`Haystack`
    - 目标模块：`task_conditioning.py`、`ContextAggregator`、`UnifiedSearchCoordinator`
 
-### 7.3 P1：建立在 P0 之上的增强能力
+### 7.5 P1：建立在 P0 之上的增强能力
 
 1. **Abstract-first recall + cue-anchor expansion**
 2. **Episodic reconstruction in quality mode + delegated evidence extraction**
 3. **Utility-driven pruning + contradiction-aware suppression**
 4. **Agent skill card / procedure shard**
 
-### 7.4 P2：中长期演进
+### 7.6 P2：中长期演进
 
 1. 学习式 memory routing / policy optimization
 2. continuity / redundancy / recovery evaluation harness
 3. 多 agent delegated memory exchange
 4. 更强的长期个性化稳定性 / 漂移控制机制
 
-### 7.5 建议落地顺序
+### 7.7 建议落地顺序
 
-#### Phase 1：先补足多轮连续性的基础信号
+#### Phase 0：先做硬编码解耦设计
 
+- 明确 trigger 配置模型
+- 明确 negative rules / language segmentation
+- 明确 recall continuity contract
+- 明确 task-conditioned scoring 的配置 / 策略接口
+- 清理 timeout 等基线漂移说明
+
+#### Phase 1：补齐 LTM 触发能力与多轮连续性的基础信号
+
+- 提升长期记忆 trigger 能力：
+  - 高精度中文 trigger
+  - negative rules
+  - 语言分层
+  - 触发后基础类型判定
 - 引入 `turn_index`、`previous_context_ids`、`dialogue_topic`、`resolution_state`
 - 将现有 task-conditioned retrieval 升级为 anti-redundancy + coverage-aware selection
 - 定义多轮体验评测指标：重复率、continuity、topic recovery、压缩可读性
 
-#### Phase 2：把消息流改造成 episode / narrative 结构
+#### Phase 2：优先升级长期记忆召回与 topic 恢复
+
+- 在召回层引入 episode/topic/continuity hints
+- 让 LTM recall 不再只是单次 query 检索
+- 明确 topic recovery 的召回 contract
+
+#### Phase 3：把消息流改造成 episode / narrative 结构，并升级压缩 / 个性化
 
 - 在 LTM 写入前增加 episode consolidation
 - 给 working memory / LTM metadata 补 `episode_id`、`topic`、`timeline_position`、`preference_scope`
-- 建立 user memory card / preference evolution 基础结构
-
-#### Phase 3：升级召回与压缩体验
-
-- 实现 scope-before-routing + episode/topic gating
 - 引入 dialogue-aware compression
-- 在固定 token budget 下做到更少重复、更多高价值信息
+- 建立 user memory card / preference evolution 基础结构
 
 #### Phase 4：增强复杂问题与多 agent 场景
 

@@ -81,7 +81,7 @@ budgets:
     hot_tier_timeout_ms: 20.0
     warm_tier_timeout_ms: 100.0
     cold_tier_timeout_ms: 300.0
-    aggregation_timeout_ms: 200.0
+    aggregation_timeout_ms: 2000.0
   tokens:
     default_token_budget: 4096
     tool_result_token_limit: 1024
@@ -186,7 +186,7 @@ auth:
 | `hot_tier_timeout_ms` | `float` | `20.0` | hot tier 超时预算 |
 | `warm_tier_timeout_ms` | `float` | `100.0` | warm tier 超时预算 |
 | `cold_tier_timeout_ms` | `float` | `300.0` | cold tier 超时预算 |
-| `aggregation_timeout_ms` | `float` | `200.0` | 聚合总超时预算 |
+| `aggregation_timeout_ms` | `float` | `2000.0` | 聚合总超时预算 |
 
 #### `budgets.tokens`
 
