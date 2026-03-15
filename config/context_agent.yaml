@@ -50,7 +50,7 @@ memory:
 
 retrieval:
   default_top_k: 10
-  timeout_ms: 250.0
+  timeout_ms: 1000.0
   rerank_top_k: 5
   hybrid:
     vector_weight: 0.6
