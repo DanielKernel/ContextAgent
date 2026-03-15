@@ -84,13 +84,13 @@ Query the underlying vector store directly to see what has been persisted.
 **List recent memories:**
 ```bash
 # syntax: memory list <scope_id> [limit]
-python3 scripts/debug.py memory list user:123
+python3 scripts/debug.py memory list openclaw
 ```
 
 **Semantic Search:**
 ```bash
 # syntax: memory search <query> <scope_id>
-python3 scripts/debug.py memory search "project preference" user:123
+python3 scripts/debug.py memory search "project preference" openclaw
 ```
 
 ## ⚠️ Common Issues & Fixes

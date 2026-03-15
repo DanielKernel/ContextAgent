@@ -31,7 +31,7 @@ def test_load_openjiuwen_yaml_config(tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
     config_path.write_text(
         """
-user_id: context-agent
+user_id: openclaw
 vector_store:
   backend: pgvector
   dsn: postgresql://localhost/context_agent
@@ -41,13 +41,13 @@ vector_store:
 
     config = load_openjiuwen_config(config_path)
 
-    assert config["user_id"] == "context-agent"
+    assert config["user_id"] == "openclaw"
     assert config["vector_store"]["backend"] == "pgvector"
 
 
 def test_load_openjiuwen_config_rejects_unsupported_format(tmp_path):
     config_path = tmp_path / "openjiuwen.toml"
-    config_path.write_text("user_id = 'context-agent'", encoding="utf-8")
+    config_path.write_text("user_id = 'openclaw'", encoding="utf-8")
 
     with pytest.raises(ContextAgentError) as exc:
         load_openjiuwen_config(config_path)
@@ -67,12 +67,15 @@ def test_build_default_api_router_without_openjiuwen_config():
 
 def test_build_default_api_router_uses_openjiuwen_adapter(monkeypatch, tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
-    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+    config_path.write_text("user_id: openclaw\n", encoding="utf-8")
     sentinel_adapter = object()
 
+    async def mock_adapter(path):
+        return sentinel_adapter
+
     monkeypatch.setattr(
-        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
-        lambda path: sentinel_adapter,
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter_async",
+        mock_adapter,
     )
 
     router = build_default_api_router(
@@ -128,7 +131,7 @@ def test_build_default_api_router_prefers_openjiuwen_llm_when_settings_are_defau
     config_path.write_text(
         "\n".join(
             [
-                "user_id: context-agent",
+                "user_id: openclaw",
                 "llm_config:",
                 "  provider: openai",
                 "  model: actual-model",
@@ -147,9 +150,13 @@ def test_build_default_api_router_prefers_openjiuwen_llm_when_settings_are_defau
         "context_agent.config.openjiuwen.HttpLLMAdapter",
         FakeLLMAdapter,
     )
+
+    async def mock_adapter(_path):
+        return object()
+
     monkeypatch.setattr(
-        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
-        lambda _path: object(),
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter_async",
+        mock_adapter,
     )
 
     router = build_default_api_router(settings=Settings(openjiuwen_config_path=str(config_path)))
@@ -165,16 +172,16 @@ def test_build_default_api_router_prefers_openjiuwen_llm_when_settings_are_defau
 
 def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeypatch, tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
-    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+    config_path.write_text("user_id: openclaw\n", encoding="utf-8")
 
-    def _raise(_path):
+    async def _raise(_path):
         raise ContextAgentError(
             "unsupported constructor",
             code=ErrorCode.OPENJIUWEN_UNAVAILABLE,
         )
 
     monkeypatch.setattr(
-        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter_async",
         _raise,
     )
 
@@ -191,16 +198,20 @@ def test_build_default_api_router_falls_back_when_openjiuwen_unavailable(monkeyp
 
 def test_build_default_api_router_uses_default_openjiuwen_path(monkeypatch, tmp_path):
     config_path = tmp_path / "openjiuwen.yaml"
-    config_path.write_text("user_id: context-agent\n", encoding="utf-8")
+    config_path.write_text("user_id: openclaw\n", encoding="utf-8")
     sentinel_adapter = object()
 
     monkeypatch.setattr(
         "context_agent.config.openjiuwen.DEFAULT_OPENJIUWEN_CONFIG_PATH",
         config_path,
     )
+
+    async def mock_adapter(path):
+        return sentinel_adapter
+
     monkeypatch.setattr(
-        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter",
-        lambda path: sentinel_adapter,
+        "context_agent.config.openjiuwen.build_openjiuwen_ltm_adapter_async",
+        mock_adapter,
     )
 
     router = build_default_api_router(settings=Settings(openjiuwen_config_path=""))

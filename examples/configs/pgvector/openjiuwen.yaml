@@ -1,4 +1,4 @@
-user_id: context-agent
+user_id: openclaw
 
 llm_config:
   provider: openai
