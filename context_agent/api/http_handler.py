@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -93,6 +94,48 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
         logger.info("ContextAgent HTTP service starting", version="0.1.0")
 
         if app.state.api_router is None:
+            # Pre-initialize openJiuwen logging to prevent duplicate logs
+            # openJiuwen attaches StreamHandlers to its loggers which causes double logging
+            # (one raw from openJiuwen, one structured via root logger).
+            try:
+                import openjiuwen.core.common.logging as oj_logging
+                
+                # Force logging system initialization
+                if hasattr(oj_logging, "_ensure_initialized"):
+                    oj_logging._ensure_initialized()
+
+                # Iterate over all LazyLoggers in the module and remove their handlers
+                # This ensures logs propagate to the root logger (configured by us)
+                # without being handled by the library's default StreamHandler
+                count = 0
+                for name, obj in inspect.getmembers(oj_logging):
+                    if isinstance(obj, oj_logging.LazyLogger):
+                        try:
+                            # Deduce the actual logger name used by LogManager
+                            if name == "logger":
+                                logger_name = "common"
+                            elif name.endswith("_logger"):
+                                logger_name = name[:-7]  # strip "_logger"
+                            else:
+                                continue
+                            
+                            # Get the real logger and clear handlers
+                            l = logging.getLogger(logger_name)
+                            if l.handlers:
+                                for h in list(l.handlers):
+                                    l.removeHandler(h)
+                                count += 1
+                        except Exception:
+                            # Ignore errors during cleanup
+                            pass
+                
+                if count > 0:
+                    logger.debug("Cleaned openJiuwen loggers", count=count)
+                    
+            except ImportError:
+                # openJiuwen not installed or structure changed
+                pass
+
             app.state.api_router = await build_default_api_router_async()
             app.state.runtime_health_checker = _known_attr(
                 app.state.api_router, "_runtime_health_checker"
