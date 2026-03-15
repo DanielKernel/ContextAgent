@@ -32,6 +32,9 @@ def _should_use_colors(stream: object | None = None) -> bool:
 
 def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
     """Configure structlog with shared processors and output format."""
+    # Pre-emptively suppress library logging to avoid duplicates during startup
+    suppress_library_logging()
+
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -140,6 +143,16 @@ def suppress_library_logging() -> int:
 
     count = 0
     # 1. Check loaded loggers in logging.Logger.manager.loggerDict
+    # Explicitly ensure 'common' logger is cleaned if it exists or will exist
+    for target in ["common", "openjiuwen", "interface", "memory", "performance"]:
+        if target in logging.Logger.manager.loggerDict:
+            logger = logging.getLogger(target)
+            if logger.handlers:
+                for h in list(logger.handlers):
+                    logger.removeHandler(h)
+                count += 1
+            logger.propagate = True
+
     for name, logger in logging.Logger.manager.loggerDict.items():
         if isinstance(logger, logging.Logger) and (
             name.startswith("openjiuwen") or name in ("common", "interface", "memory", "performance")

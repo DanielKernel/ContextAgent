@@ -92,7 +92,16 @@ ensure_context_agent_config() {
   target_dir="$(dirname "$target_path")"
   mkdir -p "$target_dir"
   if [[ -f "$target_path" ]]; then
-    info "保留已有 ContextAgent 配置：$target_path"
+    info "检查 ContextAgent 配置更新：$target_path"
+    "$VENV_DIR/bin/python3" "$PROJECT_DIR/context_agent/config/migration.py" \
+      --target "$target_path" \
+      --template "$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml" \
+      --force-key budgets.latency.aggregation_timeout_ms \
+      --force-key budgets.latency.cold_tier_timeout_ms \
+      --force-key budgets.latency.warm_tier_timeout_ms \
+      --force-key budgets.latency.hot_tier_timeout_ms \
+      --force-key retrieval.timeout_ms \
+      --force-key llm.timeout_s >/dev/null 2>&1 || warn "配置迁移失败，跳过"
     return 0
   fi
   example_file="$PROJECT_DIR/examples/configs/pgvector/context_agent.yaml"
