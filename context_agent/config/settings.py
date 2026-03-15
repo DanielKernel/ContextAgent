@@ -248,7 +248,7 @@ class Settings(BaseSettings):
 
     # ── Retrieval tuning ───────────────────────────────────────────────────────
     retrieval_default_top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=100)
-    retrieval_timeout_ms: float = Field(default=250.0, ge=10.0, le=5000.0)
+    retrieval_timeout_ms: float = Field(default=1000.0, ge=10.0, le=5000.0)
     retrieval_rerank_top_k: int = Field(default=RERANK_TOP_K, ge=1, le=200)
     retrieval_vector_weight: float = Field(default=HYBRID_VECTOR_WEIGHT, ge=0.0, le=1.0)
     retrieval_sparse_weight: float = Field(default=HYBRID_SPARSE_WEIGHT, ge=0.0, le=1.0)
