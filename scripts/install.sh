@@ -86,6 +86,20 @@ env_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 PY
 }
 
+expand_runtime_config_dir() {
+  local config_dir="$1"
+  [[ -d "$config_dir" ]] || return 0
+
+  while IFS= read -r config_file; do
+    [[ -f "$config_file" ]] || continue
+    "$VENV_DIR/bin/python3" "$PROJECT_DIR/context_agent/config/migration.py" \
+      --target "$config_file" \
+      --expand-env >/dev/null 2>&1 || warn "配置环境变量展开失败：$config_file"
+  done < <(
+    find "$config_dir" -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) | sort
+  )
+}
+
 ensure_context_agent_config() {
   local target_path="$1"
   local target_dir example_file
@@ -269,6 +283,13 @@ bash "$SCRIPT_DIR/setup-vector-backend.sh" \
   --config "$OPENJIUWEN_CONFIG_PATH"
 upsert_env_var "CA_OPENJIUWEN_CONFIG_PATH" "$OPENJIUWEN_CONFIG_PATH"
 success "openJiuwen 配置已就绪，已写入 .env：CA_OPENJIUWEN_CONFIG_PATH=$OPENJIUWEN_CONFIG_PATH"
+
+info "展开运行态配置文件中的环境变量..."
+expand_runtime_config_dir "$(dirname "$CONTEXT_AGENT_CONFIG_PATH")"
+if [[ "$(dirname "$OPENJIUWEN_CONFIG_PATH")" != "$(dirname "$CONTEXT_AGENT_CONFIG_PATH")" ]]; then
+  expand_runtime_config_dir "$(dirname "$OPENJIUWEN_CONFIG_PATH")"
+fi
+success "运行态配置环境变量已写入实际值"
 
 # ── 第 4 步：验证安装 ─────────────────────────────────────────────────────────
 info "验证安装..."

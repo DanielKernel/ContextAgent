@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from context_agent.config.migration import (
+    expand_config_file_env_vars,
     merge_missing_values,
     merge_preserving_existing,
     migrate_config_file,
@@ -112,6 +113,35 @@ def test_merge_preserving_existing_can_replace_vector_store_only():
     assert "memory_config" in inserted
 
 
+def test_merge_preserving_existing_expands_placeholder_values_from_defaults():
+    existing = {
+        "llm_config": {
+            "api_key": "${CTXLLM_API_KEY}",
+            "model": "custom-model",
+        },
+        "embedding_config": {
+            "api_key": "${EMBED_API_KEY}",
+        },
+    }
+    defaults = {
+        "llm_config": {
+            "api_key": "real-llm-key",
+            "model": "${CTXLLM_MODEL}",
+        },
+        "embedding_config": {
+            "api_key": "real-embed-key",
+        },
+    }
+
+    merged, inserted = merge_preserving_existing(existing, defaults)
+
+    assert merged["llm_config"]["api_key"] == "real-llm-key"
+    assert merged["llm_config"]["model"] == "custom-model"
+    assert merged["embedding_config"]["api_key"] == "real-embed-key"
+    assert "llm_config.api_key (expanded)" in inserted
+    assert "embedding_config.api_key (expanded)" in inserted
+
+
 def test_migrate_config_file_can_replace_top_level_keys(tmp_path):
     target = tmp_path / "openjiuwen.yaml"
     template = tmp_path / "template.yaml"
@@ -156,3 +186,38 @@ def test_migrate_config_file_can_replace_top_level_keys(tmp_path):
     assert "backend: pgvector" in text
     assert "dsn: postgresql://postgres@127.0.0.1:55432/context_agent" in text
     assert "host: 10.0.0.8" not in text
+
+
+def test_expand_config_file_env_vars_rewrites_placeholders_in_place(tmp_path, monkeypatch):
+    target = tmp_path / "openjiuwen.yaml"
+    target.write_text(
+        "\n".join(
+            [
+                "llm_config:",
+                "  model: ${CTXLLM_MODEL}",
+                "  api_key: ${CTXLLM_API_KEY}",
+                "embedding_config:",
+                "  api_key: ${EMBED_API_KEY}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CTXLLM_MODEL", "gpt-test")
+    monkeypatch.setenv("CTXLLM_API_KEY", "llm-secret")
+    monkeypatch.setenv("EMBED_API_KEY", "embed-secret")
+
+    result = expand_config_file_env_vars(target)
+
+    assert result == {
+        "mode": "expanded",
+        "changed": True,
+        "path": str(target.resolve()),
+    }
+    assert target.read_text(encoding="utf-8") == (
+        "llm_config:\n"
+        "  model: gpt-test\n"
+        "  api_key: llm-secret\n"
+        "embedding_config:\n"
+        "  api_key: embed-secret\n"
+    )

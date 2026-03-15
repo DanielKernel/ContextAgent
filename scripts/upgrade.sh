@@ -148,6 +148,20 @@ else:
 PY
 }
 
+expand_runtime_config_dir() {
+  local config_dir="$1"
+  [[ -d "$config_dir" ]] || return 0
+
+  while IFS= read -r config_file; do
+    [[ -f "$config_file" ]] || continue
+    "$VENV_DIR/bin/python3" "$PROJECT_DIR/context_agent/config/migration.py" \
+      --target "$config_file" \
+      --expand-env >/dev/null 2>&1 || warn "配置环境变量展开失败：$config_file"
+  done < <(
+    find "$config_dir" -maxdepth 1 -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) | sort
+  )
+}
+
 json_escape() {
   "$PYTHON3" - "$1" <<'PY'
 import json
@@ -453,6 +467,13 @@ PY
   --force-key "llm_config.timeout" >/dev/null
 rm -f "$EXPANDED_OPENJIUWEN_TEMPLATE" "$EXPANDED_CONTEXT_TEMPLATE"
 success "配置迁移完成（仅补齐缺省字段，不覆盖现有值）"
+
+step "展开运行态配置环境变量"
+expand_runtime_config_dir "$(dirname "$CONTEXT_AGENT_CONFIG_PATH")"
+if [[ "$(dirname "$OPENJIUWEN_CONFIG_PATH")" != "$(dirname "$CONTEXT_AGENT_CONFIG_PATH")" ]]; then
+  expand_runtime_config_dir "$(dirname "$OPENJIUWEN_CONFIG_PATH")"
+fi
+success "运行态配置环境变量已写入实际值"
 
 if [[ "$VECTOR_BACKEND" == "pgvector" ]]; then
   PG_DSN="$(load_yaml_field "$OPENJIUWEN_CONFIG_PATH" "vector_store.dsn")"

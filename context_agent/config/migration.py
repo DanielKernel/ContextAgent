@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,30 @@ def load_config_mapping(path: str | Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Config file must contain a mapping: {config_path}")
     return data
+
+
+def expand_env_placeholders(value: Any) -> Any:
+    """Recursively expand ${VAR} placeholders using the current environment."""
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    if isinstance(value, list):
+        return [expand_env_placeholders(item) for item in value]
+    if isinstance(value, dict):
+        return {key: expand_env_placeholders(item) for key, item in value.items()}
+    return value
+
+
+def expand_config_file_env_vars(target_path: str | Path) -> dict[str, Any]:
+    """Rewrite a config file in place with environment placeholders expanded."""
+    target = Path(target_path).expanduser().resolve()
+    data = load_config_mapping(target)
+    expanded = expand_env_placeholders(data)
+    changed = expanded != data
+    target.write_text(
+        yaml.safe_dump(expanded, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+    return {"mode": "expanded", "changed": changed, "path": str(target)}
 
 
 def merge_missing_values(
@@ -185,7 +210,12 @@ def migrate_config_file(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Non-destructively migrate config files.")
     parser.add_argument("--target", required=True, help="Config file to migrate")
-    parser.add_argument("--template", required=True, help="Template/default config file")
+    parser.add_argument("--template", help="Template/default config file")
+    parser.add_argument(
+        "--expand-env",
+        action="store_true",
+        help="Expand ${VAR} placeholders in the target config file in place",
+    )
     parser.add_argument(
         "--replace-top-level-key",
         action="append",
@@ -206,12 +236,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    result = migrate_config_file(
-        args.target,
-        args.template,
-        replace_top_level_keys=set(args.replace_top_level_keys),
-        force_update_keys=set(args.force_update_keys),
-    )
+    if args.expand_env:
+        result = expand_config_file_env_vars(args.target)
+    else:
+        if not args.template:
+            parser.error("--template is required unless --expand-env is used")
+        result = migrate_config_file(
+            args.target,
+            args.template,
+            replace_top_level_keys=set(args.replace_top_level_keys),
+            force_update_keys=set(args.force_update_keys),
+        )
     print(json.dumps(result, ensure_ascii=True))
 
 
