@@ -1,43 +1,38 @@
-# Debugging Guide
+# 调试指南 (Debugging Guide)
 
-ContextAgent provides a unified CLI tool `scripts/debug.py` to help developers and operators troubleshoot configuration, connectivity, and component health issues.
+ContextAgent 提供了一个统一的 CLI 工具 `scripts/debug.sh`，用于开发者和运维人员排查配置、连接性和组件健康问题。
 
-## 🛠️ Debug CLI Overview
+## 🛠️ 调试工具概览
 
-The debug script isolates specific subsystems (LLM, Embedding, Vector Store) from the main application to verify they work independently. This is useful when the main service fails to start or behaves unexpectedly.
+调试脚本将从主应用中隔离出特定的子系统（LLM、Embedding、向量数据库），以验证它们是否独立工作。这对于主服务无法启动或行为异常时的故障排查非常有用。
 
-### Prerequisites
+### 环境准备
 
-Ensure you have the project virtual environment set up:
-
-```bash
-# If not already installed
-make install
-
-# Activate venv (optional, or use .venv/bin/python3 directly)
-source .venv/bin/activate
-```
-
-The script requires `rich` and `typer` (installed by default in dev dependencies).
-
-## 🔍 Common Commands
-
-Run these commands from the project root.
-
-### 1. Check Environment Health
-
-Validates configuration files, environment variables, and database connectivity.
+无需手动安装依赖，直接运行脚本即可。`scripts/debug.sh` 会自动检查并安装所需的 Python 包（如 `rich`, `typer` 等）。
 
 ```bash
-python3 scripts/debug.py check-env
+# 无需激活虚拟环境，直接运行
+./scripts/debug.sh --help
 ```
 
-**What it checks:**
-- Presence of `openjiuwen.yaml` config.
-- Validity of YAML syntax.
-- TCP connectivity to the configured Vector Store (e.g., pgvector).
+## 🔍 常用命令
 
-**Example Output:**
+在项目根目录下运行以下命令。
+
+### 1. 检查环境健康状况 (Check Environment)
+
+验证配置文件、环境变量和数据库连接。
+
+```bash
+./scripts/debug.sh check-env
+```
+
+**检查内容:**
+- `openjiuwen.yaml` 配置文件是否存在。
+- YAML 语法是否合法。
+- 是否能通过 TCP 连接到配置的向量数据库（如 pgvector）。
+
+**输出示例:**
 ```text
 Config Path: /Users/daniel/ContextAgent/config/openjiuwen.yaml
 ✅ Config file found
@@ -46,83 +41,85 @@ DSN: postgresql://postgres@127.0.0.1:55432/context_agent
 ✅ Database connection successful
 ```
 
-### 2. View Effective Configuration
+### 2. 查看生效配置 (Show Config)
 
-Dumps the fully resolved configuration (with environment variables expanded).
-
-```bash
-python3 scripts/debug.py config show
-```
-
-Use this to verify that `${OPENAI_API_KEY}` or other placeholders are being correctly replaced by your `.env` file.
-
-### 3. Test Embedding Generation
-
-Verifies that the embedding model (e.g., OpenAI, Ollama) is reachable and authentication is correct.
+显示完全解析后的配置（已展开环境变量）。
 
 ```bash
-python3 scripts/debug.py embedding generate "Hello world"
+./scripts/debug.sh config show
 ```
 
-**Success means:**
-- API Key is valid.
-- Network connection to the provider is open.
-- Model name is correct.
+用此命令验证 `${OPENAI_API_KEY}` 等占位符是否已被 `.env` 文件正确替换。
 
-### 4. Test LLM Invocation
+### 3. 测试 Embedding 生成 (Test Embedding)
 
-Sends a simple prompt to the configured LLM to verify generation capabilities.
+验证 Embedding 模型（如 OpenAI, Ollama）是否可达且认证正确。
 
 ```bash
-python3 scripts/debug.py llm invoke "Say hello"
+./scripts/debug.sh embedding generate "Hello world"
 ```
 
-### 5. Inspect Vector Memory
+**成功意味着:**
+- API Key 有效。
+- 网络连接畅通。
+- 模型名称配置正确。
 
-Query the underlying vector store directly to see what has been persisted.
+### 4. 测试 LLM 调用 (Test LLM)
 
-**List recent memories:**
+向配置的 LLM 发送简单提示词，验证生成能力。
+
 ```bash
-# syntax: memory list <scope_id> [limit]
-python3 scripts/debug.py memory list openclaw
+./scripts/debug.sh llm invoke "Say hello"
 ```
 
-**Semantic Search:**
+### 5. 检查向量记忆 (Inspect Memory)
+
+直接查询底层向量存储，查看已持久化的数据。
+
+**列出最近的记忆:**
 ```bash
-# syntax: memory search <query> <scope_id>
-python3 scripts/debug.py memory search "project preference" openclaw
+# 语法: memory list <scope_id> [limit]
+./scripts/debug.sh memory list openclaw
 ```
 
-## ⚠️ Common Issues & Fixes
+**语义搜索:**
+```bash
+# 语法: memory search <query> <scope_id>
+./scripts/debug.sh memory search "项目偏好" openclaw
+```
 
-### "Database connection failed"
+> **注意**: `scope_id` 必须与客户端请求中的 ID 一致（默认通常为 `openclaw`）。
+
+## ⚠️ 常见问题与修复
+
+### "Database connection failed" (数据库连接失败)
 ```text
 ❌ Database connection failed: [Errno 61] Connect call failed
 Tip: Ensure pgvector service is running (scripts/start-all.sh)
 ```
-**Fix:**
-- Check if PostgreSQL is running: `pg_isready` or `brew services list`.
-- Verify the port in `.local/config/openjiuwen.yaml` matches the running service (default 55432).
-- If using the local helper script: `bash scripts/start-all.sh`.
+**修复:**
+- 检查 PostgreSQL 是否运行: `pg_isready` 或 `brew services list`。
+- 确认 `.local/config/openjiuwen.yaml` 中的端口与运行的服务匹配（默认 55432）。
+- 如果使用本地辅助脚本启动: `bash scripts/start-all.sh`。
 
-### "No embedding model available"
-**Symptoms:** Service logs show this error, or `debug.py embedding generate` fails.
-**Fix:**
-- Check API Keys in `.env`.
-- Ensure `openjiuwen.yaml` has a valid `embedding_config` section.
-- If using `pgvector`, ensure the `asyncpg` driver is installed.
+### "No embedding model available" (无可用 Embedding 模型)
+**症状:** 服务日志显示此错误，或 `debug.sh embedding generate` 失败。
+**修复:**
+- 检查 `.env` 中的 API Key。
+- 确保 `openjiuwen.yaml` 包含有效的 `embedding_config` 部分。
+- 如果使用 `pgvector`，确保已安装 `asyncpg` 驱动。
 
-### "Event loop is closed"
-**Symptoms:** `RuntimeError: Event loop is closed` during startup or debug.
-**Fix:**
-- This usually happens when `openJiuwen` components are initialized in one asyncio loop but used in another.
-- The `debug.py` script handles this by creating a fresh loop for each command.
-- In the main app, ensure `openJiuwen` adapters are built inside the startup lifespan.
+### "Event loop is closed" (事件循环已关闭)
+**症状:** 启动或调试时出现 `RuntimeError: Event loop is closed`。
+**修复:**
+- 这通常发生在 `openJiuwen` 组件在一个 asyncio 循环中初始化但在另一个循环中使用时。
+- `debug.py` 脚本通过为每个命令创建新的循环来处理此问题。
+- 在主应用中，确保 `openJiuwen` 适配器是在启动生命周期内构建的。
 
-## 📝 Advanced Usage
+## 📝 高级用法
 
-The debug script loads `dotenv` automatically. You can override specific variables inline:
+调试脚本会自动加载 `.env` 文件。你也可以通过命令行内联覆盖特定变量：
 
 ```bash
-OPENAI_API_KEY=sk-new-key... python3 scripts/debug.py llm invoke "test"
+OPENAI_API_KEY=sk-new-key... ./scripts/debug.sh llm invoke "test"
 ```
