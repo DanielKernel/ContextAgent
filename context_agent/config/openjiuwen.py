@@ -739,6 +739,7 @@ async def build_openjiuwen_ltm_adapter_async(config_path: str | Path) -> OpenJiu
         ltm=ltm,
         memory_config=config.get("memory_config"),
         cleanup_resources=cleanup_resources,
+        default_scope_config=_build_memory_scope_config(config),
     )
 
 

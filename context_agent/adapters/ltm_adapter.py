@@ -120,11 +120,48 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         ltm: Any,
         memory_config: dict[str, Any] | None = None,
         cleanup_resources: Sequence[Any] | None = None,
+        default_scope_config: Any | None = None,
     ) -> None:
         # ltm: openjiuwen LongTermMemory instance (injected at startup)
         self._ltm = ltm
         self._memory_config = memory_config or {}
         self._cleanup_resources = tuple(cleanup_resources or ())
+        self._default_scope_config = default_scope_config
+        self._initialized_scopes: set[str] = set()
+
+    async def _ensure_scope_config(self, scope_id: str) -> None:
+        """Ensure the scope has a valid configuration in LTM."""
+        if not self._default_scope_config:
+            return
+
+        if scope_id in self._initialized_scopes:
+            return
+
+        # Check if scope config exists in LTM's internal cache (fast path)
+        if hasattr(self._ltm, "_scope_config") and scope_id in self._ltm._scope_config:
+            self._initialized_scopes.add(scope_id)
+            return
+
+        # Fallback to slow check via kv_store (if exposed) or just set it
+        # Since set_scope_config is idempotent (updates KV), we can just set it
+        # if we haven't seen this scope in this process yet.
+        try:
+            # Check if config exists in KV store to avoid unnecessary writes
+            config = await self._ltm.get_scope_config(scope_id)
+            if config:
+                self._initialized_scopes.add(scope_id)
+                return
+            
+            # If not found, apply default config
+            logger.info("Initializing scope config", scope_id=scope_id)
+            await self._ltm.set_scope_config(scope_id, self._default_scope_config)
+            self._initialized_scopes.add(scope_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to ensure scope config",
+                scope_id=scope_id,
+                error=str(exc),
+            )
 
     async def search(
         self,
@@ -134,6 +171,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         memory_types: list[MemoryType] | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[ContextItem]:
+        await self._ensure_scope_config(scope_id)
         try:
             memory_config = getattr(
                 self,
@@ -187,6 +225,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         messages: list[dict[str, Any]],
         user_id: str = "",
     ) -> None:
+        await self._ensure_scope_config(scope_id)
         try:
             messages_payload = messages
             agent_config = None
@@ -232,6 +271,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
             raise AdapterError("LTM", str(exc), code=ErrorCode.MEMORY_WRITE_FAILED) from exc
 
     async def delete_by_id(self, scope_id: str, memory_id: str) -> None:
+        await self._ensure_scope_config(scope_id)
         try:
             await _call_ltm_method(
                 self._ltm.delete_mem_by_id,
@@ -255,6 +295,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         memory_id: str,
         updates: dict[str, Any],
     ) -> None:
+        await self._ensure_scope_config(scope_id)
         try:
             memory = updates.get("content", updates.get("memory", ""))
             await _call_ltm_method(
@@ -311,6 +352,7 @@ class OpenJiuwenLTMAdapter(LongTermMemoryPort):
         The LTM object may optionally expose an agentic_retrieve method that
         wraps AgenticRetriever internally.  Falls back to standard search.
         """
+        await self._ensure_scope_config(scope_id)
         if hasattr(self._ltm, "agentic_retrieve"):
             try:
                 results = await self._ltm.agentic_retrieve(  # type: ignore[attr-defined]

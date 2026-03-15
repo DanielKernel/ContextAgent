@@ -234,7 +234,7 @@ class Settings(BaseSettings):
     hot_tier_timeout_ms: float = Field(default=20.0, ge=1.0, le=200.0)
     warm_tier_timeout_ms: float = Field(default=100.0, ge=10.0, le=500.0)
     cold_tier_timeout_ms: float = Field(default=300.0, ge=50.0, le=5000.0)
-    aggregation_timeout_ms: float = Field(default=200.0, ge=50.0, le=5000.0)
+    aggregation_timeout_ms: float = Field(default=2000.0, ge=50.0, le=5000.0)
 
     # ── Token budgets ──────────────────────────────────────────────────────────
     default_token_budget: int = Field(default=4096, ge=512, le=131072)
