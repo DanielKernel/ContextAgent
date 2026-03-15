@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -69,6 +70,26 @@ class TestAsyncMemoryProcessor:
         tiered_router.warm_cache.assert_awaited_once()
         assert len(events) == 1
         assert events[0].success is True
+
+    async def test_add_task_logs_start_and_success(self, caplog):
+        ltm = AsyncMock()
+        processor = AsyncMemoryProcessor(ltm=ltm, worker_count=1)
+
+        await processor.start()
+        with caplog.at_level(logging.INFO):
+            await processor.enqueue(
+                MemoryTask(
+                    scope_id="scope-1",
+                    task_type=MemoryTaskType.ADD,
+                    session_id="session-1",
+                    messages=[{"role": "user", "content": "remember this"}],
+                )
+            )
+            await processor._queue.join()
+        await processor.stop()
+
+        assert "ltm task processing started" in caplog.text
+        assert "ltm task processing succeeded" in caplog.text
 
     async def test_checker_failure_does_not_block_add(self):
         ltm = AsyncMock()
@@ -139,3 +160,24 @@ class TestAsyncMemoryProcessor:
             )
 
         assert exc_info.value.code == ErrorCode.MEMORY_WRITE_FAILED
+
+    async def test_worker_logs_session_id_on_failure(self, caplog):
+        ltm = AsyncMock()
+        ltm.add_messages = AsyncMock(side_effect=RuntimeError("boom"))
+        processor = AsyncMemoryProcessor(ltm=ltm, worker_count=1)
+
+        await processor.start()
+        with caplog.at_level(logging.ERROR):
+            await processor.enqueue(
+                MemoryTask(
+                    scope_id="scope-1",
+                    task_type=MemoryTaskType.ADD,
+                    session_id="session-9",
+                    messages=[{"role": "user", "content": "fail me"}],
+                )
+            )
+            await processor._queue.join()
+        await processor.stop()
+
+        assert "memory task processing failed" in caplog.text
+        assert "session-9" in caplog.text

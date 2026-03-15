@@ -77,6 +77,15 @@ class MemoryOrchestrator:
             stored += 1
 
             if persist_long_term and memory_signal["should_persist"]:
+                logger.info(
+                    "ltm enqueue planned",
+                    scope_id=scope_id,
+                    session_id=session_id,
+                    role=role,
+                    memory_type=memory_signal["memory_type"].value,
+                    reason=memory_signal["reason"],
+                    request_item_id=message.get("metadata", {}).get("request_item_id", ""),
+                )
                 ltm_messages.append(
                     {
                         "role": role,
@@ -91,6 +100,16 @@ class MemoryOrchestrator:
                         },
                     }
                 )
+            else:
+                logger.info(
+                    "ltm enqueue skipped",
+                    scope_id=scope_id,
+                    session_id=session_id,
+                    role=role,
+                    reason=memory_signal["reason"],
+                    persist_long_term=persist_long_term,
+                    request_item_id=message.get("metadata", {}).get("request_item_id", ""),
+                )
 
         if ltm_messages and self._async_processor is not None:
             await self._async_processor.enqueue(
@@ -101,6 +120,12 @@ class MemoryOrchestrator:
                     user_id=user_id or scope_id,
                     messages=ltm_messages,
                 )
+            )
+            logger.info(
+                "ltm task enqueued",
+                scope_id=scope_id,
+                session_id=session_id,
+                message_count=len(ltm_messages),
             )
         return stored
 

@@ -86,6 +86,40 @@ DSN: postgresql://postgres@127.0.0.1:55432/context_agent
 
 > **注意**: `scope_id` 必须与客户端请求中的 ID 一致（默认通常为 `openclaw`）。
 
+## 🧠 长期记忆写入语义说明
+
+`/context/write` 或 OpenClaw `/v1/openclaw/ingest` 返回成功时，**默认只表示 working memory 写入成功**。
+
+这并不等于消息已经进入长期记忆。
+
+当前 ContextAgent 的长期记忆策略是启发式的，只有以下内容会进入长期记忆异步队列：
+
+- 偏好类信息，例如“以后请始终使用中文”
+- 用户画像类信息，例如“我是 Daniel”
+- 结论/完成类信息，例如“这个问题已经解决了”
+- 显式传入 `memory_type` 的写入请求
+
+普通闲聊或一般 user / assistant 对话，默认会被标记为 `working_memory_only`，因此即使接口返回 `accepted`，`ltm_memory` 也可能仍然为空。
+
+## 📋 长期记忆排查日志
+
+当前版本已补充长期记忆写入链路日志。排查时请重点搜索以下日志关键字：
+
+- `context write accepted`
+- `ltm enqueue planned`
+- `ltm enqueue skipped`
+- `ltm task enqueued`
+- `ltm task processing started`
+- `ltm task processing succeeded`
+- `memory task processing failed`
+
+推荐判断顺序：
+
+1. 如果只有 `context write accepted`，但没有 `ltm enqueue planned`，说明消息只进入了 working memory。
+2. 如果出现 `ltm enqueue planned`，但没有 `ltm task enqueued`，说明 enqueue 之前的逻辑有问题。
+3. 如果出现 `ltm task enqueued` 和 `ltm task processing started`，但最终出现 `memory task processing failed`，说明异步 LTM 写入失败。
+4. 如果出现 `ltm task processing succeeded`，再去检查 `ltm_memory` / 向量库侧数据。
+
 ## ⚠️ 常见问题与修复
 
 ### "Database connection failed" (数据库连接失败)
@@ -104,6 +138,19 @@ Tip: Ensure pgvector service is running (scripts/start-all.sh)
 - 检查 `.env` 中的 API Key。
 - 确保 `openjiuwen.yaml` 包含有效的 `embedding_config` 部分。
 - 如果使用 `pgvector`，确保已安装 `asyncpg` 驱动。
+
+### `/context/write` 返回 `accepted`，但 `ltm_memory` 没有数据
+**症状:** 接口返回成功，但长期记忆表仍为空。
+
+**说明:**
+- 这是当前设计下的常见现象，不一定代表故障。
+- `accepted` 表示 working memory 已接收。
+- 是否写入长期记忆，取决于消息分类是否命中长期记忆规则。
+
+**建议排查:**
+- 先搜索日志中的 `ltm enqueue skipped`
+- 如果消息本应进入长期记忆，可显式传入 `memory_type`
+- 如果日志中已有 `ltm task processing failed`，再继续排查 openJiuwen / embedding / 向量库问题
 
 ### "Event loop is closed" (事件循环已关闭)
 **症状:** 启动或调试时出现 `RuntimeError: Event loop is closed`。

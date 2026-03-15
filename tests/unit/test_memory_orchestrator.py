@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
+import logging
 
 import pytest
 
@@ -120,3 +121,36 @@ async def test_memory_orchestrator_honors_explicit_memory_type_requests():
     assert items[0].category == MemoryCategory.PROFILE
     task = processor.enqueue.await_args.args[0]
     assert task.session_id == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_memory_orchestrator_logs_when_ltm_enqueue_is_skipped(caplog):
+    working_memory = WorkingMemoryManager()
+    orchestrator = MemoryOrchestrator(working_memory=working_memory, async_processor=AsyncMock())
+
+    with caplog.at_level(logging.INFO):
+        stored = await orchestrator.ingest_messages(
+            scope_id="scope-1",
+            session_id="session-1",
+            messages=[{"role": "user", "content": "hello there"}],
+        )
+
+    assert stored == 1
+    assert "ltm enqueue skipped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_memory_orchestrator_logs_when_ltm_task_is_enqueued(caplog):
+    working_memory = WorkingMemoryManager()
+    processor = AsyncMock()
+    orchestrator = MemoryOrchestrator(working_memory=working_memory, async_processor=processor)
+
+    with caplog.at_level(logging.INFO):
+        await orchestrator.ingest_messages(
+            scope_id="scope-1",
+            session_id="session-1",
+            messages=[{"role": "user", "content": "Please always answer in Chinese."}],
+        )
+
+    assert "ltm enqueue planned" in caplog.text
+    assert "ltm task enqueued" in caplog.text

@@ -152,6 +152,17 @@ bash scripts/upgrade.sh --rollback .local/upgrade-backups/<timestamp>
 - 若升级后的健康检查失败，脚本会先打印最近日志，再回滚配置并尝试恢复服务
 - 若回滚后的服务仍无法恢复，脚本会继续输出最近日志，便于定位依赖、配置或端口问题
 
+### 长期记忆写入说明
+
+- `/context/write` 返回 `accepted` 时，默认表示 working memory 已写入成功
+- 是否真正进入长期记忆，取决于消息是否命中长期记忆分类规则
+- 当前默认会写入长期记忆的内容包括：
+  - 偏好类
+  - 用户画像类
+  - 结论/完成类
+  - 显式指定 `memory_type` 的消息
+- 普通对话默认可能只进入 working memory，因此 `ltm_memory` 为空不一定代表故障
+
 ### 5 行接入
 
 ```python

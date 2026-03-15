@@ -130,6 +130,7 @@ class AsyncMemoryProcessor:
                 logger.error(
                     "memory task processing failed",
                     scope_id=task.scope_id,
+                    session_id=task.session_id,
                     task_type=task.task_type,
                     error=str(exc),
                 )
@@ -140,6 +141,13 @@ class AsyncMemoryProcessor:
         success = False
         try:
             if task.task_type == MemoryTaskType.ADD:
+                logger.info(
+                    "ltm task processing started",
+                    scope_id=task.scope_id,
+                    session_id=task.session_id,
+                    task_type=task.task_type.value,
+                    message_count=len(task.messages),
+                )
                 # Run conflict/duplicate check if checker is available
                 if self._checker is not None:
                     try:
@@ -163,6 +171,13 @@ class AsyncMemoryProcessor:
                     session_id=task.session_id,
                     messages=task.messages,
                     user_id=task.user_id,
+                )
+                logger.info(
+                    "ltm task processing succeeded",
+                    scope_id=task.scope_id,
+                    session_id=task.session_id,
+                    task_type=task.task_type.value,
+                    message_count=len(task.messages),
                 )
 
             elif task.task_type == MemoryTaskType.DELETE:

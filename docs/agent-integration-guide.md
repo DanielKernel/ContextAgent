@@ -470,6 +470,21 @@ HTTP / OpenClaw ingest
 - `embedding_config.dimension` 与 `vector_store.embedding_dimension` 是否一致
 - 业务写入是否经过 `OpenJiuwenLTMAdapter`
 
+再补充一个很容易误判的点：
+
+- `/context/write` 返回 `accepted`，默认只表示消息已进入 working memory
+- 是否进入长期记忆，还取决于 `MemoryOrchestrator` 的分类结果
+- 当前默认只会把偏好、画像、结论，以及显式指定 `memory_type` 的消息送入长期记忆
+
+如果你在排查“为什么没有写入 `ltm_memory`”，建议直接查以下日志：
+
+- `ltm enqueue planned`
+- `ltm enqueue skipped`
+- `ltm task enqueued`
+- `ltm task processing started`
+- `ltm task processing succeeded`
+- `memory task processing failed`
+
 ---
 
 ## 10. 推荐阅读顺序

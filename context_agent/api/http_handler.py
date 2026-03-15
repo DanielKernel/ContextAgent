@@ -252,6 +252,15 @@ def create_app(api_router: ContextAPIRouter | None = None) -> FastAPI:
             ],
         )
         status = "accepted" if persisted else "ignored"
+        logger.info(
+            "context write accepted",
+            scope_id=req.scope_id,
+            session_id=req.session_id,
+            source_type=req.source_type,
+            requested_memory_type=req.memory_type or "",
+            accepted_count=persisted,
+            note="accepted means working-memory persistence; long-term persistence depends on memory classification",
+        )
         return WriteResponse(item_id=item_id, status=status)
 
     @app.post(
